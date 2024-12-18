@@ -1,3 +1,4 @@
+import functools
 from collections import deque
 from typing import Sequence, Tuple
 
@@ -18,13 +19,14 @@ class Dag:
 
     @property
     def sources(self) -> Sequence[Node]:
-        return _remove_duplicates([x for x, _ in self.arcs if all((y, x) not in self.arcs for y, _ in self.arcs if y != x)])
+        return _remove_duplicates(
+            [x for x, _ in self.arcs if all((y, x) not in self.arcs for y, _ in self.arcs if y != x)])
 
     @property
     def sinks(self) -> Sequence[Node]:
         return _remove_duplicates(
-            [y for _, y in self.arcs 
-             if all((y, x) not in self.arcs 
+            [y for _, y in self.arcs
+             if all((y, x) not in self.arcs
                     for _, x in self.arcs if x != y)]
         )
 
@@ -35,6 +37,18 @@ class Dag:
     @property
     def node_labels(self) -> Sequence[str]:
         return [node.label for node in self.nodes]
+
+    def __getitem__(self, label: str | Tuple[str, str]) -> Node | Tuple[Node, Node]:
+        if isinstance(label, str):  # Returns a Node
+            lst = [node for node in self.nodes if node.label == label]
+            assert len(lst) == 1, "Node does not exist with the given label"
+            return lst[0]
+        elif isinstance(label, tuple):  # Returns Tuple[Node, Node]
+            src_label = label[0]
+            dst_label = label[1]
+            lst = list(filter(lambda tup: tup[0] == src_label and tup[1] == dst_label, self.arcs))
+            assert len(lst) == 1, "Arc does not exist with the given source & destination labels."
+            return lst[0]
 
     def add_arc(self, src_node: Node, dst_node: Node) -> "Dag":
         if self.nodes and (src_node not in self.nodes) and (dst_node not in self.nodes):
@@ -90,7 +104,7 @@ class Dag:
 
     def direct_dependencies(self, node: Node) -> Sequence[Node]:
         return [x for x, y in self.arcs if y == node]
-    
+
     def neighbors(self, node: Node) -> Sequence[Node]:
         self._is_in_dag(node)
         return [y for x, y in self.arcs if x == node]
@@ -121,3 +135,33 @@ class Dag:
         if node not in path:
             return -1
         return path.index(node)
+
+
+def node_registrator(dag: Dag, label: str, depends_on: list[str | Node] | None = None):
+    # `node_registrator` only works for non-source nodes.
+    # The source nodes, has to be manually defined and referenced by other non-source nodes.
+    if not depends_on:
+        raise ValueError("The callback must have dependencies.")
+
+    if any(not isinstance(dep, (str, Node)) for dep in depends_on):
+        raise TypeError("The dependencies must be a String (label) or Node.")
+
+    def outer(cb_func):
+        # Construct a Node instance for the callback
+        node = dag[label] if label in dag.node_labels else Node(label, cb_func)
+
+        for dependency in depends_on:
+            if isinstance(dependency, str):
+                other_node = dag[dependency]
+                dag.add_arc(other_node, node)
+            elif isinstance(dependency, Node):
+                # This dependency must be a source node
+                dag.add_arc(dependency, node)
+
+        @functools.wraps(cb_func)
+        def wrapper(*args, **kwargs):
+            return cb_func(*args, **kwargs)
+
+        return wrapper
+
+    return outer

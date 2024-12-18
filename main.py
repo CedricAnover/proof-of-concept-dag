@@ -17,14 +17,14 @@ class CustomResult(JsonResult):
     stderr: str
 
 
-def my_callback(node_: Node, dep_results_dict: dict[str, CustomResult], message=None) -> CustomResult:
+def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) -> CustomResult:
     if message:
-        print(f"[node-{node_.label}] Dependency Results - {dep_results_dict} | Message: {message}")
+        print(f"[node-{node.label}] Dependency Results - {dep_results} | Message: {message}")
     else:
-        print(f"[node-{node_.label}] Dependency Results - {dep_results_dict}")
+        print(f"[node-{node.label}] Dependency Results - {dep_results}")
     # Simulate long-running process
     time.sleep(random.randint(1, 4))
-    return CustomResult(f"{node_.label}-stdout", f"{node_.label}-stderr")
+    return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
 
 
 node_1 = Node("1", my_callback)
