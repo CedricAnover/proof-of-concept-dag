@@ -24,14 +24,14 @@ class CustomResult(JsonResult):
     stderr: str
 
 
-def my_callback(node_: Node, dep_results_dict: dict[str, CustomResult], message=None) -> CustomResult:
+def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) -> CustomResult:
     if message:
-        print(f"[node-{node_.label}] Dependency Results - {dep_results_dict} | Message: {message}")
+        print(f"[node-{node.label}] Dependency Results - {dep_results} | Message: {message}")
     else:
-        print(f"[node-{node_.label}] Dependency Results - {dep_results_dict}")
+        print(f"[node-{node.label}] Dependency Results - {dep_results}")
     # Simulate long-running process
     time.sleep(random.randint(1, 4))
-    return CustomResult(f"{node_.label}-stdout", f"{node_.label}-stderr")
+    return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
 
 
 node_1 = Node("1", my_callback)
@@ -55,11 +55,11 @@ dag.add_arc(node_6, node_7)
 
 for src, dst in dag.arcs:
     print(f"{src} --> {dst}")
+print()
 
 res_io = LocalResultIO(TEMP_DIR, CustomResult)
 async_conduit = AsyncConduit(dag, res_io)
 async_conduit.start()
-
 ```
 
 **Output:**
@@ -73,6 +73,7 @@ async_conduit.start()
 4 --> 7
 7 --> 8
 6 --> 7
+
 [node-1] Running.
 [node-1] Dependency Results - {}
 [node-2] Running.

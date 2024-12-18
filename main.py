@@ -48,6 +48,7 @@ dag.add_arc(node_6, node_7)
 
 for src, dst in dag.arcs:
     print(f"{src} --> {dst}")
+print()
 
 res_io = LocalResultIO(TEMP_DIR, CustomResult)
 async_conduit = AsyncConduit(dag, res_io)
