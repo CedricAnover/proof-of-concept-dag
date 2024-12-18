@@ -1,18 +1,40 @@
+import functools
 from typing import Callable, Dict
-from abc import ABCMeta, ABC, abstractmethod
 
 from enums import NodeStateEnum
 from result import *
+
+
+def update_node_state(start_func):
+    """Decorator for Node.start method to automatically update its state from RUNNING to COMPLETE."""
+    @functools.wraps(start_func)
+    def wrapper(self, *args, **kwargs):
+        assert isinstance(self, Node)
+
+        # Set NodeStateEnum to NodeStateEnum.RUNNING
+        self.set_state(NodeStateEnum.RUNNING)
+
+        result = start_func(self, *args, **kwargs)
+
+        # Set NodeStateEnum to NodeStateEnum.COMPLETE
+        self.set_state(NodeStateEnum.COMPLETE)
+        return result
+    return wrapper
 
 
 class Node:
     def __init__(self,
                  label: str,
                  callback: Callable[["Node", Dict[str, Result]], Result],
+                 *cb_args,
+                 **cb_kwargs
                  ) -> None:
         self.label = label
         self.callback = callback
         self.state: NodeStateEnum = NodeStateEnum.IDLE
+
+        self._cb_args = cb_args
+        self._cb_kwargs = cb_kwargs
 
     def __str__(self) -> str:
         return self.label
@@ -21,15 +43,13 @@ class Node:
         self.state = new_state
         return self.state
 
+    @update_node_state
     def start(self,
               dependencies: list["Node"],
               result_io: ResultIO,
-              *cb_args,
               use_dependency_results: bool = True,
-              **cb_kwargs
               ) -> None:
-        # Set NodeStateEnum to NodeStateEnum.RUNNING
-        self.set_state(NodeStateEnum.RUNNING)
+
         print(f"[node-{self.label}] Running.")
 
         # Get the Results from Dependencies
@@ -39,11 +59,9 @@ class Node:
                 {dependency.label: result_io.read_result(dependency.label) for dependency in dependencies}
 
         # Perform Processing and get Result object
-        result = self.callback(self, dependency_results, *cb_args, **cb_kwargs)
+        result = self.callback(self, dependency_results, *self._cb_args, **self._cb_kwargs)
 
         # Store Result object with ResultIO
         result_io.write_result(result, self.label)
 
-        # Set NodeStateEnum to NodeStateEnum.COMPLETE
-        self.set_state(NodeStateEnum.COMPLETE)
         print(f"[node-{self.label}] Done.")

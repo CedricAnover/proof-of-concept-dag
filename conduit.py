@@ -2,7 +2,7 @@ import asyncio
 from abc import ABC, abstractmethod
 from typing import Sequence
 from enums import NodeStateEnum
-from result import *
+from result import ResultIO
 from node import Node
 from dag import Dag
 

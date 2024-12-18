@@ -21,7 +21,7 @@ class Result(ABC):
 
 
 class JsonResultMeta(ABCMeta):
-    # Important: We assume that the dictioanry is JSON Serializable!
+    # Important: We assume that the dictionary is JSON Serializable!
     def __new__(mcls, name: str, bases: tuple, attrs: dict):
         # Add to_json() and from_json() methods to a subclass of Result
         attrs["to_json"] = mcls.to_json
