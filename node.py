@@ -62,7 +62,8 @@ class Node:
 
         # Perform Processing and get Result object
         result = self.callback(self, dependency_results, *self._cb_args, **self._cb_kwargs)
-        assert isinstance(result, self.result_kind), "The result of the node is not the same as the declared result kind."
+        if not isinstance(result, self.result_kind):
+            raise TypeError("The result of the node is not the same as the declared result kind.")
 
         # Store Result object with ResultIO
         result_io.write_result(result, self.label)
