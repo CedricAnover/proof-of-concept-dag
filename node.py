@@ -26,11 +26,13 @@ class Node:
     def __init__(self,
                  label: str,
                  callback: Callable[["Node", Dict[str, Result]], Result],
+                 result_kind: type[Result],
                  *cb_args,
                  **cb_kwargs
                  ) -> None:
         self.label = label
         self.callback = callback
+        self.result_kind = result_kind
         self.state: NodeStateEnum = NodeStateEnum.IDLE
 
         self._cb_args = cb_args
@@ -56,10 +58,11 @@ class Node:
         dependency_results = dict()
         if use_dependency_results:
             dependency_results: dict[str, Result] = \
-                {dependency.label: result_io.read_result(dependency.label) for dependency in dependencies}
+                {dependency.label: result_io.read_result(dependency.label, dependency.result_kind) for dependency in dependencies}
 
         # Perform Processing and get Result object
         result = self.callback(self, dependency_results, *self._cb_args, **self._cb_kwargs)
+        assert isinstance(result, self.result_kind), "The result of the node is not the same as the declared result kind."
 
         # Store Result object with ResultIO
         result_io.write_result(result, self.label)

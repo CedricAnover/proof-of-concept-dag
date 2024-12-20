@@ -1,3 +1,5 @@
+"""Heterogeneous Result Kind
+"""
 import time
 import random
 from pathlib import Path
@@ -15,6 +17,12 @@ TEMP_DIR = str(Path(__file__).resolve().parent / ".tmp")
 class CustomResult(JsonResult):
     stdout: str
     stderr: str
+
+
+@dataclass
+class CustomResultB(JsonResult):
+    """This custom result kind is used for demonstrating 'heterogeneous result kind'."""
+    stdout: str
 
 
 # Define a callback for Source nodes
@@ -37,39 +45,40 @@ node_2 = Node("2", my_callback, CustomResult, message="Hello World")
 
 
 def _cb_func(node, dep_results):
-    res = CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
-    print(f"[node-{node.label}] {dep_results}")
+    res = CustomResultB(f"{node.label}-stdout")
+    # print(f"[node-{node.label}] {dep_results}")
+    print(f"[node-{node.label}] {res}")
     return res
 
 
 # "Non-Source" nodes dependent on "Source" nodes must use a `Node` object instead of strings.
 @node_registrator(dag, "3", depends_on=[node_1, node_2])
-def cb_3(node, dep_results) -> CustomResult:
+def cb_3(node, dep_results) -> CustomResultB:
     return _cb_func(node, dep_results)
 
 
 @node_registrator(dag, "4", depends_on=["3"])
-def cb_4(node, dep_results) -> CustomResult:
+def cb_4(node, dep_results) -> CustomResultB:
     return _cb_func(node, dep_results)
 
 
 @node_registrator(dag, "5", depends_on=["3"])
-def cb_5(node, dep_results) -> CustomResult:
+def cb_5(node, dep_results) -> CustomResultB:
     return _cb_func(node, dep_results)
 
 
 @node_registrator(dag, "6", depends_on=["5"])
-def cb_6(node, dep_results) -> CustomResult:
+def cb_6(node, dep_results) -> CustomResultB:
     return _cb_func(node, dep_results)
 
 
 @node_registrator(dag, "7", depends_on=["4", "6"])
-def cb_7(node, dep_results) -> CustomResult:
+def cb_7(node, dep_results) -> CustomResultB:
     return _cb_func(node, dep_results)
 
 
 @node_registrator(dag, "8", depends_on=["7"])
-def cb_7(node, dep_results) -> CustomResult:
+def cb_7(node, dep_results) -> CustomResultB:
     return _cb_func(node, dep_results)
 
 

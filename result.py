@@ -54,16 +54,15 @@ class JsonResult(Result):
 
 
 class ResultIO(ABC):
-    def __init__(self, temp_location: str, result_kind: type[Result]):
+    def __init__(self, temp_location: str):
         self.temp_location = temp_location
-        self.result_kind = result_kind
 
     @abstractmethod
     def write_result(self, result: Result, node_label: str, *args, **kwargs) -> None:
         pass
 
     @abstractmethod
-    def read_result(self, node_label: str, *args, **kwargs) -> Result:
+    def read_result(self, node_label: str, result_kind: type[Result], *args, **kwargs) -> Result:
         pass
 
 
@@ -113,8 +112,8 @@ class LocalResultIO(ResultIO, metaclass=LocalFsCrudMeta):
         file_path = self.file_path(node_label, file_extension=self.file_extension)
         file_path.write_text(result.serialize())
 
-    def read_result(self, node_label: str) -> Result:
+    def read_result(self, node_label: str, result_kind: type[Result]) -> Result:
         file_path = self.file_path(node_label, file_extension=self.file_extension)
         obj_str = file_path.read_text()
-        result = self.result_kind.deserialize(obj_str)
+        result = result_kind.deserialize(obj_str)
         return result

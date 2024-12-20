@@ -1,4 +1,5 @@
 import functools
+import inspect
 from collections import deque
 from typing import Sequence, Tuple
 
@@ -148,7 +149,12 @@ def node_registrator(dag: Dag, label: str, depends_on: list[str | Node] | None =
 
     def outer(cb_func):
         # Construct a Node instance for the callback
-        node = dag[label] if label in dag.node_labels else Node(label, cb_func)
+        # Warn: The callback definition must have a return type hint with the result kind!!!
+        sig = inspect.signature(cb_func)
+        result_kind = sig.return_annotation
+        if result_kind is inspect.Signature.empty:
+            raise TypeError("Provide a type hint for the callback return with a result_kind.")
+        node = dag[label] if label in dag.node_labels else Node(label, cb_func, result_kind)
 
         for dependency in depends_on:
             if isinstance(dependency, str):
