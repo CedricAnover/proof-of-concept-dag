@@ -242,6 +242,8 @@ async_conduit.start()
 
 ## Example 3: Heterogeneous Result
 
+The callback requires a type hint for the kind of result it should return. It would raise `TypeError` if it is not provided in the callback function definition.
+
 ```python
 import time
 import random
