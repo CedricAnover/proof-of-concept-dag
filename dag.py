@@ -138,7 +138,11 @@ class Dag:
         return path.index(node)
 
 
-def node_registrator(dag: Dag, label: str, depends_on: list[str | Node] | None = None):
+def node_registrator(dag: Dag,
+                     label: str,
+                     depends_on: list[str | Node] | None = None,
+                     use_dependency_results: bool = True,
+                     ):
     # `node_registrator` only works for non-source nodes.
     # The source nodes, has to be manually defined and referenced by other non-source nodes.
     if not depends_on:
@@ -154,7 +158,13 @@ def node_registrator(dag: Dag, label: str, depends_on: list[str | Node] | None =
         result_kind = sig.return_annotation
         if result_kind is inspect.Signature.empty:
             raise TypeError("Provide a type hint for the callback return with a result_kind.")
-        node = dag[label] if label in dag.node_labels else Node(label, cb_func, result_kind)
+        node = dag[label] if label in dag.node_labels\
+            else Node(
+                label,
+                cb_func,
+                result_kind,
+                use_dependency_results=use_dependency_results
+            )
 
         for dependency in depends_on:
             if isinstance(dependency, str):
