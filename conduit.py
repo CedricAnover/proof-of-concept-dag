@@ -1,10 +1,21 @@
 import asyncio
+import mmap
+import struct
+import multiprocessing
+import signal
+import math
+import time
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, Future
 from abc import ABC, abstractmethod
 from typing import Sequence
 from enums import NodeStateEnum
 from result import ResultIO
 from node import Node
 from dag import Dag
+
+
+class ConduitError(Exception):
+    pass
 
 
 class Conduit(ABC):
@@ -87,6 +98,64 @@ class AsyncConduit(Conduit):
 
         try:
             asyncio.run(self._main_loop())
+        finally:
+            if hasattr(self.result_io, "delete_temp_directory"):
+                self.result_io.delete_temp_directory(ignore_errors=True)
+
+
+class ThreadPoolConduit(Conduit):
+    def __init__(self, dag: Dag, result_io: ResultIO, *pool_args, **pool_kwargs):
+        super().__init__(dag, result_io)
+        self._pool_args = pool_args
+        self._pool_kwargs = pool_kwargs
+        self._submitted_nodes = set()  # Track nodes that have been submitted
+
+    def _submit_node_tasks(self, executor: ThreadPoolExecutor) -> list[Future]:
+        """Submit tasks for all nodes that are ready to execute."""
+        futures = []
+
+        # Start the source nodes
+        for src_node in self.dag.sources:
+            if src_node not in self._submitted_nodes:
+                print(f"[node-{src_node.label}] Ready for execution.")
+                self._submitted_nodes.add(src_node)  # Mark as submitted
+                futures.append(executor.submit(src_node.start, [], self.result_io))
+
+        # Keep submitting tasks for all ready nodes
+        while not self.are_all_nodes_complete():
+            for node in self.get_nodes(NodeStateEnum.IDLE):
+                if node not in self._submitted_nodes and self.is_node_ready(node):
+                    dependencies = self.dag.direct_dependencies(node)
+                    print(f"[node-{node.label}] Ready for execution.")
+                    self._submitted_nodes.add(node)  # Mark as submitted
+                    futures.append(executor.submit(node.start, dependencies, self.result_io))
+
+        return futures
+
+    def _main_loop(self) -> None:
+        with ThreadPoolExecutor(*self._pool_args, **self._pool_kwargs) as executor:
+            # Submit tasks for source nodes and any other nodes that are ready
+            futures = self._submit_node_tasks(executor)
+
+            # Wait for all tasks to complete
+            for future in as_completed(futures):
+                try:
+                    future.result()  # Wait for each task to complete and raise any exception
+                except ConduitError as e:
+                    error_message = f"Error occurred during task execution: {e}"
+                    raise ConduitError(error_message)
+
+    def start(self) -> None:
+        """Start the DAG execution."""
+        # Delete and initialize result directory
+        if hasattr(self.result_io, "delete_temp_directory"):
+            self.result_io.delete_temp_directory(ignore_errors=True)
+
+        if hasattr(self.result_io, "create_temp_directory"):
+            self.result_io.create_temp_directory()
+
+        try:
+            self._main_loop()
         finally:
             if hasattr(self.result_io, "delete_temp_directory"):
                 self.result_io.delete_temp_directory(ignore_errors=True)
