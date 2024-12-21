@@ -86,8 +86,8 @@ class LocalFsCrudMeta(ABCMeta):
         assert ResultIO in bases, "ResultIO is not inherited."
 
         attrs["read_results"] = mcls.read_results
-        attrs["create_temp_directory"] = mcls.create_temp_directory
-        attrs["delete_temp_directory"] = mcls.delete_temp_directory
+        attrs["create_temp_location"] = mcls.create_temp_location
+        attrs["delete_temp_location"] = mcls.delete_temp_location
         attrs["file_path"] = mcls.file_path
 
         new_cls = super().__new__(mcls, name, bases, attrs)
@@ -98,12 +98,12 @@ class LocalFsCrudMeta(ABCMeta):
         return [self.read_result(node_label, *args, **kwargs) for node_label in node_labels]
 
     @staticmethod
-    def create_temp_directory(self, *args, **kwargs) -> None:
+    def create_temp_location(self, *args, **kwargs) -> None:
         os.makedirs(self.temp_location, *args, **kwargs)
 
     @staticmethod
-    def delete_temp_directory(self, *args, **kwargs) -> None:
-        shutil.rmtree(self.temp_location, *args, **kwargs)
+    def delete_temp_location(self, *args, ignore_errors=True, **kwargs) -> None:
+        shutil.rmtree(self.temp_location, *args, ignore_errors=ignore_errors, **kwargs)
 
     @staticmethod
     def file_path(self, node_label: str, file_extension: str | None = None) -> Path:

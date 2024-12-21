@@ -5,6 +5,7 @@ import multiprocessing
 import signal
 import math
 import time
+import functools
 from multiprocessing import Process, cpu_count
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, Future
 from abc import ABC, abstractmethod
@@ -73,7 +74,34 @@ class ParallelConduits:
             print(f"{proc.name} Completed.")
             proc.join()
 
-# TODO: Add decorator(s) for Creating and Deleting the Temporary Locations.
+
+def create_and_delete_temp_location(create_args=(), delete_args=(), create_kw=None, delete_kw=None):
+    """Decorator for creating and deleting temporary locations with ResultIO."""
+    create_kw = create_kw or dict()
+    delete_kw = delete_kw or dict()
+    def outer(start_func):
+        @functools.wraps(start_func)
+        def wrapper(self, *args, **kwargs):
+            # Delete Temporary Location, if exists
+            # Ensure that the temporary location is new
+            if hasattr(self.result_io, "delete_temp_location"):
+                self.result_io.delete_temp_location(*delete_args, **delete_kw)
+
+            # Create Temporary Location
+            if hasattr(self.result_io, "create_temp_location"):
+                self.result_io.create_temp_location(*create_args, **create_kw)
+
+            try:
+                start_func(self, *args, **kwargs)
+            finally:
+                # Delete Temporary Location
+                if hasattr(self.result_io, "delete_temp_location"):
+                    self.result_io.delete_temp_location(*delete_args, **delete_kw)
+
+        return wrapper
+
+    return outer
+
 
 class AsyncConduit(Conduit):
     def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10):
@@ -125,20 +153,10 @@ class AsyncConduit(Conduit):
             await self._execute_ready_nodes(semaphore)
             await asyncio.sleep(delay)
 
+    @create_and_delete_temp_location()
     def start(self) -> None:
         """Start the DAG execution."""
-        # Delete and initialize result directory
-        if hasattr(self.result_io, "delete_temp_directory"):
-            self.result_io.delete_temp_directory(ignore_errors=True)
-
-        if hasattr(self.result_io, "create_temp_directory"):
-            self.result_io.create_temp_directory()
-
-        try:
-            asyncio.run(self._main_loop())
-        finally:
-            if hasattr(self.result_io, "delete_temp_directory"):
-                self.result_io.delete_temp_directory(ignore_errors=True)
+        asyncio.run(self._main_loop())
 
 
 class ThreadPoolConduit(Conduit):
@@ -183,17 +201,7 @@ class ThreadPoolConduit(Conduit):
                     error_message = f"Error occurred during task execution: {e}"
                     raise ConduitError(error_message)
 
+    @create_and_delete_temp_location()
     def start(self) -> None:
         """Start the DAG execution."""
-        # Delete and initialize result directory
-        if hasattr(self.result_io, "delete_temp_directory"):
-            self.result_io.delete_temp_directory(ignore_errors=True)
-
-        if hasattr(self.result_io, "create_temp_directory"):
-            self.result_io.create_temp_directory()
-
-        try:
-            self._main_loop()
-        finally:
-            if hasattr(self.result_io, "delete_temp_directory"):
-                self.result_io.delete_temp_directory(ignore_errors=True)
+        self._main_loop()
