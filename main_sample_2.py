@@ -77,6 +77,14 @@ for src, dst in dag.arcs:
     print(f"{src} --> {dst}")
 print()
 
+
+# # Example: Transfering Results in another directory before deletion
+# res_io = LocalResultIO(name_prefix="myresultio")
+# async_conduit = AsyncConduit(dag, res_io)
+# async_conduit.start(dest_dir="results")
+
+
+# Example: Custom Temporary Directory
 res_io = LocalResultIO(TEMP_DIR)
 async_conduit = AsyncConduit(dag, res_io)
 async_conduit.start()

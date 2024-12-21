@@ -6,6 +6,7 @@ import signal
 import math
 import time
 import functools
+import os
 from multiprocessing import Process, cpu_count
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, Future
 from abc import ABC, abstractmethod
@@ -75,8 +76,20 @@ class ParallelConduits:
             proc.join()
 
 
-def create_and_delete_temp_location(create_args=(), delete_args=(), create_kw=None, delete_kw=None):
-    """Decorator for creating and deleting temporary locations with ResultIO."""
+def create_and_delete_temp_location(create_args=(),
+                                    delete_args=(),
+                                    create_kw: dict | None = None,
+                                    delete_kw: dict | None = None,
+                                    ):
+    """
+    Decorator for creating and deleting temporary locations with ResultIO.
+
+    Args:
+        `create_args` (tuple, optional): Positional arguments for creating temporary location. Defaults to ().
+        `delete_args` (tuple, optional): Positional arguments for deleting temporary location. Defaults to ().
+        `create_kw` (dict, optional): Keyword arguments for creating temporary location. Defaults to None.
+        `delete_kw` (dict, optional): Keyword arguments for deleting temporary location. Defaults to None.
+    """
     create_kw = create_kw or dict()
     delete_kw = delete_kw or dict()
     def outer(start_func):
@@ -154,9 +167,17 @@ class AsyncConduit(Conduit):
             await asyncio.sleep(delay)
 
     @create_and_delete_temp_location()
-    def start(self) -> None:
+    def start(self, dest_dir: str | None = None) -> None:
         """Start the DAG execution."""
         asyncio.run(self._main_loop())
+
+        if dest_dir and hasattr(self.result_io, "transfer_results"):
+            try:
+                os.makedirs(dest_dir)
+            except FileExistsError:
+                pass
+            finally:
+                self.result_io.transfer_results(dest_dir)
 
 
 class ThreadPoolConduit(Conduit):
@@ -202,6 +223,14 @@ class ThreadPoolConduit(Conduit):
                     raise ConduitError(error_message)
 
     @create_and_delete_temp_location()
-    def start(self) -> None:
+    def start(self, dest_dir: str | None = None) -> None:
         """Start the DAG execution."""
         self._main_loop()
+
+        if dest_dir and hasattr(self.result_io, "transfer_results"):
+            try:
+                os.makedirs(dest_dir)
+            except FileExistsError:
+                pass
+            finally:
+                self.result_io.transfer_results(dest_dir)

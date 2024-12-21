@@ -55,8 +55,8 @@ class JsonResult(Result):
 
 
 class ResultIO(ABC):
-    def __init__(self, temp_location: Optional[str] = None):
-        temp_dir_name = f"dag-{uuid.uuid4()}"
+    def __init__(self, temp_location: Optional[str] = None, name_prefix: str = "dag"):
+        temp_dir_name = f"{name_prefix}-{uuid.uuid4()}"
         root_temp_dir = Path(tempfile.gettempdir()).resolve()
         self.temp_location = temp_location or str(root_temp_dir / temp_dir_name)
 
@@ -85,10 +85,15 @@ class LocalFsCrudMeta(ABCMeta):
     def __new__(mcls, name: str, bases: tuple, attrs: dict):
         assert ResultIO in bases, "ResultIO is not inherited."
 
+        # Flag if results need to be transfered to
+        # another directory before deletion.
+        attrs["use_transfer_results"] = False
+
         attrs["read_results"] = mcls.read_results
         attrs["create_temp_location"] = mcls.create_temp_location
         attrs["delete_temp_location"] = mcls.delete_temp_location
         attrs["file_path"] = mcls.file_path
+        attrs["transfer_results"] = mcls.transfer_results
 
         new_cls = super().__new__(mcls, name, bases, attrs)
         return new_cls
@@ -104,6 +109,20 @@ class LocalFsCrudMeta(ABCMeta):
     @staticmethod
     def delete_temp_location(self, *args, ignore_errors=True, **kwargs) -> None:
         shutil.rmtree(self.temp_location, *args, ignore_errors=ignore_errors, **kwargs)
+
+    @staticmethod
+    def transfer_results(self, destination_dir: str) -> None:
+        dest_dir_path = Path(destination_dir).resolve()
+        src_dir_path = Path(self.temp_location).resolve()
+
+        if not dest_dir_path.exists():
+            # By default, the user must create the directory.
+            raise FileNotFoundError("The directory for transfering results does not exist.")
+
+        if not dest_dir_path.is_dir():
+            raise ValueError("The given destination directory is not a directory.")
+
+        shutil.move(src_dir_path, dest_dir_path)
 
     @staticmethod
     def file_path(self, node_label: str, file_extension: str | None = None) -> Path:
