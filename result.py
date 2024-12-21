@@ -2,6 +2,7 @@ import json
 import os
 import shutil
 import tempfile
+import functools
 from pathlib import Path
 from typing import AnyStr
 from dataclasses import dataclass, asdict
@@ -64,6 +65,18 @@ class ResultIO(ABC):
     @abstractmethod
     def read_result(self, node_label: str, result_kind: type[Result], *args, **kwargs) -> Result:
         pass
+
+
+class MemoryResultIO(ResultIO):
+    def __init__(self):
+        super().__init__("")
+        self._result_storage = dict()  # In memory
+
+    def write_result(self, result: Result, node_label: str) -> None:
+        self._result_storage[node_label] = result
+
+    def read_result(self, node_label: str, result_kind: type[Result]) -> Result:
+        return self._result_storage[node_label]
 
 
 class LocalFsCrudMeta(ABCMeta):
