@@ -2,9 +2,9 @@ import json
 import os
 import shutil
 import tempfile
-import functools
+import uuid
 from pathlib import Path
-from typing import AnyStr
+from typing import AnyStr, Optional
 from dataclasses import dataclass, asdict
 from abc import ABC, ABCMeta, abstractmethod
 
@@ -55,8 +55,10 @@ class JsonResult(Result):
 
 
 class ResultIO(ABC):
-    def __init__(self, temp_location: str):
-        self.temp_location = temp_location
+    def __init__(self, temp_location: Optional[str] = None):
+        temp_dir_name = f"dag-{uuid.uuid4()}"
+        root_temp_dir = Path(tempfile.gettempdir()).resolve()
+        self.temp_location = temp_location or str(root_temp_dir / temp_dir_name)
 
     @abstractmethod
     def write_result(self, result: Result, node_label: str, *args, **kwargs) -> None:
@@ -90,12 +92,6 @@ class LocalFsCrudMeta(ABCMeta):
 
         new_cls = super().__new__(mcls, name, bases, attrs)
         return new_cls
-
-    def __call__(cls, *args, temp_dir_name: str = "marsh_dag", **kwargs):
-        instance = super().__call__(*args, **kwargs)
-        # Give custom name to the temporary directory
-        instance.temp_location = str(Path(tempfile.gettempdir()).resolve() / temp_dir_name)
-        return instance
 
     @staticmethod
     def read_results(self, node_labels: list[str], *args, **kwargs) -> list[Result]:
