@@ -5,6 +5,7 @@ import multiprocessing
 import signal
 import math
 import time
+from multiprocessing import Process, cpu_count
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, Future
 from abc import ABC, abstractmethod
 from typing import Sequence
@@ -36,6 +37,43 @@ class Conduit(ABC):
     def is_node_ready(self, node: Node) -> bool:
         return all(dep.state == NodeStateEnum.COMPLETE for dep in self.dag.direct_dependencies(node))
 
+
+class ParallelConduits:
+    """Run multiple conduits in parallel."""
+    def __init__(self, name: str, max_processors: int = 4):
+        if max_processors > cpu_count():
+            raise ValueError("max_processors exceeds the number of cpu in this machine.")
+
+        self.name = name
+
+        self._processors: list[Process] = []
+        self._max_processors = max_processors
+
+    @property
+    def num_processors(self) -> int:
+        return len(self._processors)
+
+    def add_conduit(self, conduit: Conduit, *start_args, **start_kw) -> None:
+        if self.num_processors >= self._max_processors:
+            raise ValueError("Adding a new conduit would exceed the maximum number of worker processors.")
+
+        processor = Process(
+            target=conduit.start,
+            name=f"{self.name}-{self.num_processors + 1}",
+            args=start_args,
+            kwargs=start_kw
+        )
+        self._processors.append(processor)
+
+    def start(self) -> None:
+        for proc in self._processors:
+            print(f"Starting {proc.name} ...")
+            proc.start()
+        for proc in self._processors:
+            print(f"{proc.name} Completed.")
+            proc.join()
+
+# TODO: Add decorator(s) for Creating and Deleting the Temporary Locations.
 
 class AsyncConduit(Conduit):
     def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10):
