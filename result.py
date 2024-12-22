@@ -4,8 +4,8 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path
-from typing import AnyStr, Optional
-from dataclasses import dataclass, asdict
+from typing import AnyStr, Any, Optional, Type, get_type_hints, get_args, get_origin
+from dataclasses import dataclass, fields, is_dataclass
 from abc import ABC, ABCMeta, abstractmethod
 
 
@@ -21,37 +21,100 @@ class Result(ABC):
         pass
 
 
-class JsonResultMeta(ABCMeta):
-    # Important: We assume that the dictionary is JSON Serializable!
+class DictMeta(ABCMeta):
     def __new__(mcls, name: str, bases: tuple, attrs: dict):
-        # Add to_json() and from_json() methods to a subclass of Result
-        attrs["to_json"] = mcls.to_json
-        attrs["from_json"] = classmethod(mcls.from_json)
+        # Add `to_dict` and `from_dict` methods
+        attrs["to_dict"] = mcls.to_dict
+        attrs["from_dict"] = classmethod(mcls.from_dict)
 
-        new_cls = super().__new__(mcls, name, bases, attrs)
-        return new_cls
-
-    @staticmethod
-    def to_json(self, *args, **kwargs) -> str:
-        # Assert that `self` is a Result (i.e. dataclass)
-        assert isinstance(self, Result)
-        return json.dumps(asdict(self), *args, **kwargs)
+        return super().__new__(mcls, name, bases, attrs)
 
     @staticmethod
-    def from_json(cls, json_str: str, *args, **kwargs) -> Result:
-        dct = dict(json.loads(json_str, *args, **kwargs))
-        return cls(**dct)
+    def _is_dataclass_instance(obj):
+        """Check if an object is a dataclass instance."""
+        return is_dataclass(obj) and not isinstance(obj, type)
+
+    @staticmethod
+    def _from_dict_recursive(cls: Type[Any], data: Any) -> Any:
+        """
+        Recursively convert dictionary data to dataclass instances.
+        """
+        if isinstance(data, dict):
+            if is_dataclass(cls):
+                # Handle nested dataclass for dictionary fields
+                init_kwargs = {}
+                type_hints = get_type_hints(cls)
+                for field_name, field_value in data.items():
+                    field_type = type_hints.get(field_name, Any)
+                    if DictMeta._is_dataclass_instance(field_type):
+                        init_kwargs[field_name] = field_type.from_dict(field_value)
+                    elif get_origin(field_type) == dict:
+                        key_type, value_type = get_args(field_type)
+                        init_kwargs[field_name] = {
+                            key_type(k): DictMeta._from_dict_recursive(value_type, v)
+                            for k, v in field_value.items()
+                        }
+                    elif get_origin(field_type) == list:
+                        inner_type = get_args(field_type)[0]
+                        init_kwargs[field_name] = [
+                            DictMeta._from_dict_recursive(inner_type, v)
+                            for v in field_value
+                        ]
+                    else:
+                        init_kwargs[field_name] = field_value
+                return cls(**init_kwargs)
+            return data
+        elif isinstance(data, list):
+            # Handle lists of dataclasses
+            return [DictMeta._from_dict_recursive(cls, item) for item in data]
+        return data
+
+    @staticmethod
+    def _to_dict_recursive(obj: Any) -> Any:
+        """
+        Recursively convert dataclass instances to dictionaries.
+        """
+        if DictMeta._is_dataclass_instance(obj):
+            return {
+                field.name: DictMeta._to_dict_recursive(getattr(obj, field.name))
+                for field in fields(obj)
+            }
+        elif isinstance(obj, list):
+            return [DictMeta._to_dict_recursive(item) for item in obj]
+        elif isinstance(obj, dict):
+            return {str(k): DictMeta._to_dict_recursive(v) for k, v in obj.items()}
+        return obj
+
+    @staticmethod
+    def from_dict(cls: Type["Result"], data: dict) -> "Result":
+        """
+        Recursively convert a dictionary to a dataclass instance.
+        """
+        return DictMeta._from_dict_recursive(cls, data)
+
+    @staticmethod
+    def to_dict(self) -> dict:
+        """
+        Recursively convert a dataclass instance to a dictionary.
+        """
+        return DictMeta._to_dict_recursive(self)
 
 
 @dataclass
-class JsonResult(Result):
+class JsonResult(Result, metaclass=DictMeta):
     @classmethod
-    def deserialize(cls, obj_str: str, *args, **kwargs) -> "JsonResult":
+    def deserialize(cls: Type["JsonResult"], obj_str: str, *args, **kwargs) -> "JsonResult":
+        """
+        Deserialize JSON string to an instance of the class, handling nested dataclasses.
+        """
         dct = json.loads(obj_str, *args, **kwargs)
-        return cls(**dct)
+        return cls.from_dict(dct)
 
     def serialize(self, *args, **kwargs) -> str:
-        return json.dumps(asdict(self), *args, **kwargs)
+        """
+        Serialize the dataclass to JSON, handling nested dataclasses.
+        """
+        return json.dumps(self.to_dict(), *args, **kwargs)
 
 
 class ResultIO(ABC):
