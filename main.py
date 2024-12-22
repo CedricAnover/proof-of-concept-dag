@@ -1,14 +1,11 @@
 import time
 import random
-from pathlib import Path
 from dataclasses import dataclass
 
 from conduit import AsyncConduit
 from result import JsonResult, LocalResultIO
 from dag import Dag
 from node import Node
-
-TEMP_DIR = str(Path(__file__).resolve().parent / ".tmp")
 
 
 @dataclass
@@ -23,7 +20,7 @@ def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) 
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
     # Simulate long-running process
-    time.sleep(random.randint(1, 4))
+    time.sleep(random.randint(1, 2))
     return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
 
 
@@ -50,6 +47,6 @@ for src, dst in dag.arcs:
     print(f"{src} --> {dst}")
 print()
 
-res_io = LocalResultIO(TEMP_DIR)
-async_conduit = AsyncConduit(dag, res_io)
+res_io = LocalResultIO()
+async_conduit = AsyncConduit.create_with_clean_start(dag, res_io)
 async_conduit.start()

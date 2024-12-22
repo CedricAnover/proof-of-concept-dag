@@ -1,14 +1,11 @@
 """Example: Using `DagBuilder` to construct `Dag`.
 """
-from pathlib import Path
 from dataclasses import dataclass
 
 from conduit import AsyncConduit
 from result import JsonResult, LocalResultIO
 from dag import DagBuilder
 from node import Node
-
-TEMP_DIR = str(Path(__file__).resolve().parent / ".tmp")
 
 
 @dataclass
@@ -44,5 +41,5 @@ for src, dst in dag.arcs:
 print()
 
 res_io = LocalResultIO()
-async_conduit = AsyncConduit(dag, res_io)
+async_conduit = AsyncConduit.create_with_clean_start(dag, res_io)
 async_conduit.start()

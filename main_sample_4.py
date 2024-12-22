@@ -2,15 +2,12 @@
 
 import time
 import random
-from pathlib import Path
 from dataclasses import dataclass
 
 from conduit import ThreadPoolConduit
 from result import JsonResult, LocalResultIO
 from dag import Dag
 from node import Node
-
-TEMP_DIR = str(Path(__file__).resolve().parent / ".tmp")
 
 
 @dataclass
@@ -25,7 +22,7 @@ def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) 
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
     # Simulate long-running process
-    time.sleep(random.randint(1, 4))
+    time.sleep(random.randint(1, 2))
     return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
 
 
@@ -53,6 +50,6 @@ if __name__ == "__main__":
         print(f"{src} --> {dst}")
     print()
 
-    res_io = LocalResultIO(TEMP_DIR)
-    async_conduit = ThreadPoolConduit(dag, res_io, max_workers=10)
+    res_io = LocalResultIO()
+    async_conduit = ThreadPoolConduit.create_with_clean_start(dag, res_io, max_workers=10)
     async_conduit.start()

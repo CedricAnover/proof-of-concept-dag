@@ -9,8 +9,9 @@ import functools
 import os
 from multiprocessing import Process, cpu_count
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, Future
-from abc import ABC, abstractmethod
+from abc import ABCMeta, ABC, abstractmethod
 from typing import Sequence
+from types import MethodType
 from enums import NodeStateEnum
 from result import ResultIO
 from node import Node
@@ -76,47 +77,102 @@ class ParallelConduits:
             proc.join()
 
 
-def create_and_delete_temp_location(create_args=(),
-                                    delete_args=(),
-                                    create_kw: dict | None = None,
-                                    delete_kw: dict | None = None,
-                                    ):
-    """
-    Decorator for creating and deleting temporary locations with ResultIO.
+class ConduitFactoryMixin(ABCMeta):
+    def __new__(mcls, name, bases, attrs, /, *mcls_args, **mcls_kwargs):
+        # Attach the New Factory Methods
+        attrs["create_with_clean_start"] = classmethod(mcls.create_with_clean_start)
+        attrs["create_with_result_backup"] = classmethod(mcls.create_with_result_backup)
 
-    Args:
-        `create_args` (tuple, optional): Positional arguments for creating temporary location. Defaults to ().
-        `delete_args` (tuple, optional): Positional arguments for deleting temporary location. Defaults to ().
-        `create_kw` (dict, optional): Keyword arguments for creating temporary location. Defaults to None.
-        `delete_kw` (dict, optional): Keyword arguments for deleting temporary location. Defaults to None.
-    """
-    create_kw = create_kw or dict()
-    delete_kw = delete_kw or dict()
-    def outer(start_func):
-        @functools.wraps(start_func)
-        def wrapper(self, *args, **kwargs):
-            # Delete Temporary Location, if exists
-            # Ensure that the temporary location is new
+        new_cls = super().__new__(mcls, name, bases, attrs, *mcls_args, **mcls_kwargs)
+        return new_cls
+
+    @staticmethod
+    def create_with_clean_start(cls,
+                                *conduit_args,
+                                delete_temp_location: bool = True,
+                                delete_args=(),
+                                delete_kwargs=None,
+                                create_args=(),
+                                create_kwargs=None,
+                                **conduit_kwargs
+                                ) -> type[Conduit]:
+        """
+        Conduit Factory Method that overrides the original Conduit.start method to delete
+        and re-create a temporary directory before starting the conduit.
+        """
+        instance = cls(*conduit_args, **conduit_kwargs)
+
+        delete_kwargs = delete_kwargs or dict()
+        create_kwargs = create_kwargs or dict()
+
+        # Store the original start before modifications
+        original_start = instance.start
+
+        # Define the new start method
+        def start(self, *args, **kwargs):
+            assert hasattr(self, "result_io"), "The instance does not have 'result_io' field."
+
+            # Create the temporary location for storing results
             if hasattr(self.result_io, "delete_temp_location"):
-                self.result_io.delete_temp_location(*delete_args, **delete_kw)
-
-            # Create Temporary Location
+                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
             if hasattr(self.result_io, "create_temp_location"):
-                self.result_io.create_temp_location(*create_args, **create_kw)
+                # Create Temporary Location
+                self.result_io.create_temp_location(*create_args, **create_kwargs)
 
-            try:
-                start_func(self, *args, **kwargs)
-            finally:
-                # Delete Temporary Location
-                if hasattr(self.result_io, "delete_temp_location"):
-                    self.result_io.delete_temp_location(*delete_args, **delete_kw)
+            # Invoke the original start method but dont pass `self`
+            original_start(*args, **kwargs)
 
-        return wrapper
+            # Delete Temporary Location, if specified
+            if delete_temp_location and hasattr(self.result_io, "delete_temp_location"):
+                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
 
-    return outer
+        # Modify the start method to create a temporary directory before running.
+        instance.start = start.__get__(instance)
+        return instance
+
+    @staticmethod
+    def create_with_result_backup(cls: type[Conduit],
+                                  backup_location: str,
+                                  *conduit_args,
+                                  delete_args=(),
+                                  delete_kwargs=None,
+                                  create_args=(),
+                                  create_kwargs=None,
+                                  **conduit_kwargs
+                                  ) -> type[Conduit]:
+        instance = cls(*conduit_args, **conduit_kwargs)
+
+        delete_kwargs = delete_kwargs or dict()
+        create_kwargs = create_kwargs or dict()
+
+        # Store the original start before modifications
+        original_start = instance.start
+
+        # Define the new start method
+        def start(self, *args, **kwargs):
+            # Delete and Create the Temporary Location
+            assert hasattr(self, "result_io"), "The instance does not have 'result_io' field."
+            if hasattr(self.result_io, "delete_temp_location"):
+                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
+            if hasattr(self.result_io, "create_temp_location"):
+                self.result_io.create_temp_location(*create_args, **create_kwargs)
+
+            # Invoke the original start method but dont pass `self`
+            original_start(*args, **kwargs)
+
+            # Backup/Transfer the Results to a new location
+            if hasattr(self.result_io, "delete_temp_location"):
+                if backup_location and hasattr(self.result_io, "transfer_results"):
+                    # Backup Results to new location
+                    self.result_io.transfer_results(backup_location)
+                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
+
+        # Modify the start() method to create a temporary directory before running.
+        instance.start = start.__get__(instance)
+        return instance
 
 
-class AsyncConduit(Conduit):
+class AsyncConduit(Conduit, metaclass=ConduitFactoryMixin):
     def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10):
         super().__init__(dag, result_io)
         self.concurrency_limit = concurrency_limit
@@ -166,21 +222,12 @@ class AsyncConduit(Conduit):
             await self._execute_ready_nodes(semaphore)
             await asyncio.sleep(delay)
 
-    @create_and_delete_temp_location()
-    def start(self, dest_dir: str | None = None) -> None:
+    def start(self) -> None:
         """Start the DAG execution."""
         asyncio.run(self._main_loop())
 
-        if dest_dir and hasattr(self.result_io, "transfer_results"):
-            try:
-                os.makedirs(dest_dir)
-            except FileExistsError:
-                pass
-            finally:
-                self.result_io.transfer_results(dest_dir)
 
-
-class ThreadPoolConduit(Conduit):
+class ThreadPoolConduit(Conduit, metaclass=ConduitFactoryMixin):
     def __init__(self, dag: Dag, result_io: ResultIO, *pool_args, **pool_kwargs):
         super().__init__(dag, result_io)
         self._pool_args = pool_args
@@ -222,15 +269,6 @@ class ThreadPoolConduit(Conduit):
                     error_message = f"Error occurred during task execution: {e}"
                     raise ConduitError(error_message)
 
-    @create_and_delete_temp_location()
-    def start(self, dest_dir: str | None = None) -> None:
+    def start(self) -> None:
         """Start the DAG execution."""
         self._main_loop()
-
-        if dest_dir and hasattr(self.result_io, "transfer_results"):
-            try:
-                os.makedirs(dest_dir)
-            except FileExistsError:
-                pass
-            finally:
-                self.result_io.transfer_results(dest_dir)

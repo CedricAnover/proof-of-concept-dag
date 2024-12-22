@@ -121,6 +121,8 @@ class ResultIO(ABC):
     def __init__(self, temp_location: Optional[str] = None, name_prefix: str = "dag"):
         temp_dir_name = f"{name_prefix}-{uuid.uuid4()}"
         root_temp_dir = Path(tempfile.gettempdir()).resolve()
+
+        # Defaults locally if temp_location is not provided (locally or remotely)
         self.temp_location = temp_location or str(root_temp_dir / temp_dir_name)
 
     @abstractmethod
@@ -147,10 +149,6 @@ class MemoryResultIO(ResultIO):
 class LocalFsCrudMeta(ABCMeta):
     def __new__(mcls, name: str, bases: tuple, attrs: dict):
         assert ResultIO in bases, "ResultIO is not inherited."
-
-        # Flag if results need to be transfered to
-        # another directory before deletion.
-        attrs["use_transfer_results"] = False
 
         attrs["read_results"] = mcls.read_results
         attrs["create_temp_location"] = mcls.create_temp_location
@@ -179,8 +177,7 @@ class LocalFsCrudMeta(ABCMeta):
         src_dir_path = Path(self.temp_location).resolve()
 
         if not dest_dir_path.exists():
-            # By default, the user must create the directory.
-            raise FileNotFoundError("The directory for transfering results does not exist.")
+            os.makedirs(str(dest_dir_path))
 
         if not dest_dir_path.is_dir():
             raise ValueError("The given destination directory is not a directory.")
@@ -201,6 +198,8 @@ class LocalResultIO(ResultIO, metaclass=LocalFsCrudMeta):
 
     def write_result(self, result: Result, node_label: str) -> None:
         file_path = self.file_path(node_label, file_extension=self.file_extension)
+        if not file_path.parent.exists():
+            file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(result.serialize())
 
     def read_result(self, node_label: str, result_kind: type[Result]) -> Result:

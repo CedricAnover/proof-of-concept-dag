@@ -15,8 +15,6 @@ from result import JsonResult, LocalResultIO
 from dag import Dag
 from node import Node
 
-TEMP_DIR = str(Path(__file__).resolve().parent / ".tmp")
-
 
 @dataclass
 class CustomResult(JsonResult):
@@ -30,7 +28,7 @@ def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) 
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
     # Simulate long-running process
-    time.sleep(random.randint(1, 4))
+    time.sleep(random.randint(1, 2))
     return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
 
 
@@ -57,8 +55,8 @@ for src, dst in dag.arcs:
     print(f"{src} --> {dst}")
 print()
 
-res_io = LocalResultIO(TEMP_DIR)
-async_conduit = AsyncConduit(dag, res_io)
+res_io = LocalResultIO()
+async_conduit = AsyncConduit.create_with_clean_start(dag, res_io)
 async_conduit.start()
 ```
 
@@ -78,8 +76,8 @@ async_conduit.start()
 [node-1] Dependency Results - {}
 [node-2] Running.
 [node-2] Dependency Results - {} | Message: Hello World
-[node-2] Done.
 [node-1] Done.
+[node-2] Done.
 [node-3] Ready for execution.
 [node-3] Running.
 [node-3] Dependency Results - {'1': CustomResult(stdout='1-stdout', stderr='1-stderr'), '2': CustomResult(stdout='2-stdout', stderr='2-stderr')}
@@ -90,8 +88,8 @@ async_conduit.start()
 [node-4] Running.
 [node-5] Dependency Results - {'3': CustomResult(stdout='3-stdout', stderr='3-stderr')}
 [node-4] Dependency Results - {'3': CustomResult(stdout='3-stdout', stderr='3-stderr')}
-[node-4] Done.
 [node-5] Done.
+[node-4] Done.
 [node-6] Ready for execution.
 [node-6] Running.
 [node-6] Dependency Results - {'5': CustomResult(stdout='5-stdout', stderr='5-stderr')} | Message: Some Message
@@ -121,8 +119,6 @@ from result import JsonResult, LocalResultIO
 from dag import Dag, node_registrator
 from node import Node
 
-TEMP_DIR = str(Path(__file__).resolve().parent / ".tmp")
-
 
 @dataclass
 class CustomResult(JsonResult):
@@ -137,7 +133,7 @@ def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) 
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
     # Simulate long-running process
-    time.sleep(random.randint(1, 4))
+    time.sleep(random.randint(1, 2))
     return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
 
 
@@ -190,10 +186,10 @@ for src, dst in dag.arcs:
     print(f"{src} --> {dst}")
 print()
 
-res_io = LocalResultIO(TEMP_DIR)
-async_conduit = AsyncConduit(dag, res_io)
-async_conduit.start()
 
+res_io = LocalResultIO()
+async_conduit = AsyncConduit.create_with_clean_start(dag, res_io)
+async_conduit.start()
 ```
 
 **Output:**
@@ -212,8 +208,8 @@ async_conduit.start()
 [node-1] Dependency Results - {}
 [node-2] Running.
 [node-2] Dependency Results - {} | Message: Hello World
-[node-2] Done.
 [node-1] Done.
+[node-2] Done.
 [node-3] Ready for execution.
 [node-3] Running.
 [node-3] {'1': CustomResult(stdout='1-stdout', stderr='1-stderr'), '2': CustomResult(stdout='2-stdout', stderr='2-stderr')}
@@ -247,15 +243,12 @@ The callback requires a type hint for the kind of result it should return. It wo
 ```python
 import time
 import random
-from pathlib import Path
 from dataclasses import dataclass
 
 from conduit import AsyncConduit
 from result import JsonResult, LocalResultIO
 from dag import Dag, node_registrator
 from node import Node
-
-TEMP_DIR = str(Path(__file__).resolve().parent / ".tmp")
 
 
 @dataclass
@@ -277,14 +270,14 @@ def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) 
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
     # Simulate long-running process
-    time.sleep(random.randint(1, 4))
+    time.sleep(random.randint(1, 2))
     return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
 
 
 # Create a Dag instance
 dag = Dag()
 
-# Create the Source Nodes (All Source Nodes have a result kind of `CustomResult`)
+# Create the Source Nodes
 node_1 = Node("1", my_callback, CustomResult)
 node_2 = Node("2", my_callback, CustomResult, message="Hello World")
 
@@ -297,7 +290,6 @@ def _cb_func(node, dep_results):
 
 
 # "Non-Source" nodes dependent on "Source" nodes must use a `Node` object instead of strings.
-# All Non-Source nodes have a result kind of `CustomResultB`.
 @node_registrator(dag, "3", depends_on=[node_1, node_2])
 def cb_3(node, dep_results) -> CustomResultB:
     return _cb_func(node, dep_results)
@@ -332,8 +324,8 @@ for src, dst in dag.arcs:
     print(f"{src} --> {dst}")
 print()
 
-res_io = LocalResultIO(TEMP_DIR)
-async_conduit = AsyncConduit(dag, res_io)
+res_io = LocalResultIO()
+async_conduit = AsyncConduit.create_with_clean_start(dag, res_io)
 async_conduit.start()
 ```
 
@@ -353,8 +345,8 @@ async_conduit.start()
 [node-1] Dependency Results - {}
 [node-2] Running.
 [node-2] Dependency Results - {} | Message: Hello World
-[node-1] Done.
 [node-2] Done.
+[node-1] Done.
 [node-3] Ready for execution.
 [node-3] Running.
 [node-3] CustomResultB(stdout='3-stdout')
@@ -363,10 +355,10 @@ async_conduit.start()
 [node-4] Ready for execution.
 [node-5] Running.
 [node-4] Running.
-[node-5] CustomResultB(stdout='5-stdout')
 [node-4] CustomResultB(stdout='4-stdout')
-[node-5] Done.
+[node-5] CustomResultB(stdout='5-stdout')
 [node-4] Done.
+[node-5] Done.
 [node-6] Ready for execution.
 [node-6] Running.
 [node-6] CustomResultB(stdout='6-stdout')

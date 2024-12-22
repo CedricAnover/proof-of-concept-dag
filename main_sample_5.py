@@ -1,15 +1,9 @@
-import time
-import random
-from pathlib import Path
 from dataclasses import dataclass
 
 from conduit import AsyncConduit, ParallelConduits
 from result import JsonResult, LocalResultIO
 from dag import Dag
 from node import Node
-
-
-TEMP_DIR = str(Path(__file__).resolve().parent / ".tmp")
 
 
 @dataclass
@@ -59,7 +53,7 @@ def main():
     for _ in range(max_processors):
         dag = create_dag()
         res_io = LocalResultIO()
-        async_conduit = AsyncConduit(dag, res_io)
+        async_conduit = AsyncConduit.create_with_clean_start(dag, res_io)
         parallel_conduits.add_conduit(async_conduit)
 
     parallel_conduits.start()
