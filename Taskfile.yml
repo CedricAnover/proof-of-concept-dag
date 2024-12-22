@@ -4,7 +4,7 @@ silent: true
 
 # Examples:
 # task run-samples-parallel
-# task --parallel sample-main sample-main-2
+# task --parallel sample-1 sample-2
 
 # dotenv:
 #   - .env
