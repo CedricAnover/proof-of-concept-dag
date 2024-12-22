@@ -1,8 +1,8 @@
 import functools
 from typing import Callable, Dict
 
-from enums import NodeStateEnum
-from result import *
+from .enums import NodeStateEnum
+from .result import *
 
 
 def update_node_state(start_func):

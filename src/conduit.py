@@ -12,10 +12,11 @@ from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_compl
 from abc import ABCMeta, ABC, abstractmethod
 from typing import Sequence
 from types import MethodType
-from enums import NodeStateEnum
-from result import ResultIO
-from node import Node
-from dag import Dag
+
+from .enums import NodeStateEnum
+from .result import ResultIO
+from .node import Node
+from .dag import Dag
 
 
 class ConduitError(Exception):

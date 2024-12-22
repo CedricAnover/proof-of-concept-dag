@@ -3,8 +3,8 @@ import inspect
 from collections import deque
 from typing import Sequence, Tuple, Callable
 
-from result import Result
-from node import Node
+from .result import Result
+from .node import Node
 
 
 def _remove_duplicates(lst: list) -> list:

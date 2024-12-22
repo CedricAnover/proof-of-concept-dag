@@ -2,10 +2,10 @@ import time
 import random
 from dataclasses import dataclass
 
-from conduit import AsyncConduit
-from result import JsonResult, LocalResultIO
-from dag import Dag
-from node import Node
+from src.conduit import AsyncConduit
+from src.result import JsonResult, LocalResultIO
+from src.dag import Dag
+from src.node import Node
 
 
 @dataclass

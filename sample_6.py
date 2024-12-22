@@ -2,10 +2,10 @@
 """
 from dataclasses import dataclass
 
-from conduit import AsyncConduit
-from result import JsonResult, LocalResultIO
-from dag import DagBuilder
-from node import Node
+from src.conduit import AsyncConduit
+from src.result import JsonResult, LocalResultIO
+from src.dag import DagBuilder
+from src.node import Node
 
 
 @dataclass

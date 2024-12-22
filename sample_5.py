@@ -1,13 +1,9 @@
-"""Example: ThreadPoolConduit"""
-
-import time
-import random
 from dataclasses import dataclass
 
-from conduit import ThreadPoolConduit
-from result import JsonResult, LocalResultIO
-from dag import Dag
-from node import Node
+from src.conduit import AsyncConduit, ParallelConduits
+from src.result import JsonResult, LocalResultIO
+from src.dag import Dag
+from src.node import Node
 
 
 @dataclass
@@ -21,12 +17,10 @@ def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) 
         print(f"[node-{node.label}] Dependency Results - {dep_results} | Message: {message}")
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
-    # Simulate long-running process
-    time.sleep(random.randint(1, 2))
     return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
 
 
-if __name__ == "__main__":
+def create_dag() -> Dag:
     node_1 = Node("1", my_callback, CustomResult)
     node_2 = Node("2", my_callback, CustomResult, message="Hello World")
     node_3 = Node("3", my_callback, CustomResult)
@@ -49,7 +43,21 @@ if __name__ == "__main__":
     for src, dst in dag.arcs:
         print(f"{src} --> {dst}")
     print()
+    return dag
 
-    res_io = LocalResultIO()
-    async_conduit = ThreadPoolConduit.create_with_clean_start(dag, res_io, max_workers=10)
-    async_conduit.start()
+
+def main():
+    max_processors = 4
+
+    parallel_conduits = ParallelConduits("my-parallel-conduits", max_processors=max_processors)
+    for _ in range(max_processors):
+        dag = create_dag()
+        res_io = LocalResultIO()
+        async_conduit = AsyncConduit.create_with_clean_start(dag, res_io)
+        parallel_conduits.add_conduit(async_conduit)
+
+    parallel_conduits.start()
+
+
+if __name__ == "__main__":
+    main()

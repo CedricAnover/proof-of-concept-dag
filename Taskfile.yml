@@ -1,0 +1,52 @@
+version: '3'
+
+silent: true
+
+# Examples:
+# task run-samples-parallel
+# task --parallel sample-main sample-main-2
+
+# dotenv:
+#   - .env
+
+# Template Variables
+# vars:
+#   GREETING: Hello, World!
+
+# Environment Variables
+# env:
+#   ENV_VAR_1: value1
+
+tasks:
+  default:
+    cmds:
+      - task: run-samples-parallel
+
+  sample-1:
+    cmds:
+      - python -B sample_1.py
+
+  sample-2:
+    cmds:
+      - python -B sample_2.py
+
+  sample-3:
+    cmds:
+      - python -B sample_3.py
+
+  sample-4:
+    cmds:
+      - python -B sample_4.py
+  
+  sample-5:
+    cmds:
+      - python -B sample_5.py
+  
+  sample-6:
+    cmds:
+      - python -B sample_6.py
+
+  run-samples-parallel:
+    deps: [sample-1, sample-2, sample-3, sample-4, sample-5, sample-6]
+    cmds:
+      - echo "Taskfile Parallel Done!!!"
