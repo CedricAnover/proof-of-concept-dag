@@ -1,8 +1,9 @@
 import functools
 import inspect
 from collections import deque
-from typing import Sequence, Tuple
+from typing import Sequence, Tuple, Callable
 
+from result import Result
 from node import Node
 
 
@@ -143,6 +144,7 @@ def node_registrator(dag: Dag,
                      depends_on: list[str | Node] | None = None,
                      use_dependency_results: bool = True,
                      ):
+    """Decorator for wrapping a custom function as a node to the given DAG."""
     # `node_registrator` only works for non-source nodes.
     # The source nodes, has to be manually defined and referenced by other non-source nodes.
     if not depends_on:
@@ -181,3 +183,70 @@ def node_registrator(dag: Dag,
         return wrapper
 
     return outer
+
+
+class DagBuilder:
+    """
+    Builder object for constructing a DAG.
+
+    This serves as an alternative to the `node_registrator` decorator for building a DAG using the Builder Pattern.
+
+    Similar to `node_registrator`, adding source nodes requires using a `Node` object in the `depends_on` list parameter.
+
+    Example:
+        ```
+        # Generic Usage
+        node_1 = Node(...)  #<-- Source Node
+        dag_builder = DagBuilder()
+        dag_builder.add_node("node_label_2", cb_func_2, SomeCustomResult, depends_on=[node_1], *cb_args, **cb_kwargs)
+        dag_builder.add_node("node_label_3", cb_func_3, SomeCustomResult, depends_on=["node_label_2", node_1], *cb_args, **cb_kwargs)
+        ...
+        dag = dag_builder.build()
+        dag_builder.reset()  #<-- Resets the internal states of DagBuilder
+        ```
+    """
+    def __init__(self):
+        self._dag = Dag()
+
+    def add_node(self,
+                 label: str,
+                 cb_func: Callable[["Node", dict[str, Result]], Result],
+                 result_kind: type[Result],
+                 depends_on: list[str | Node],
+                 use_dependency_results: bool = True,
+                 *cb_args,
+                 **cb_kwargs
+                 ) -> "DagBuilder":
+        """
+        Creates a `Node` from given parameters and dependencies.
+
+        Which then forms an arc (from dependencies to the constructed node) to be added in the `Dag`.
+        """
+        node = self._dag[label] if label in self._dag.node_labels \
+            else Node(
+                label,
+                cb_func,
+                result_kind,
+                *cb_args,
+                use_dependency_results=use_dependency_results,
+                **cb_kwargs,
+            )
+
+        # Register the dependency arc to the DAG
+        for dependency in depends_on:
+            if isinstance(dependency, str):
+                other_node = self._dag[dependency]
+                self._dag.add_arc(other_node, node)
+            elif isinstance(dependency, Node):
+                # This dependency must be a source node
+                self._dag.add_arc(dependency, node)
+
+        return self
+
+    def reset(self) -> None:
+        """Resets the internal states of the `DagBuilder`."""
+        self._dag = Dag()
+
+    def build(self) -> Dag:
+        """Builds the `Dag`."""
+        return self._dag
