@@ -143,6 +143,7 @@ def node_registrator(dag: Dag,
                      label: str,
                      depends_on: list[str | Node] | None = None,
                      use_dependency_results: bool = True,
+                     node_kind: type[Node] = Node,
                      ):
     """Decorator for wrapping a custom function as a node to the given DAG."""
     # `node_registrator` only works for non-source nodes.
@@ -161,7 +162,7 @@ def node_registrator(dag: Dag,
         if result_kind is inspect.Signature.empty:
             raise TypeError("Provide a type hint for the callback return with a result_kind.")
         node = dag[label] if label in dag.node_labels\
-            else Node(
+            else node_kind(
                 label,
                 cb_func,
                 result_kind,
@@ -214,6 +215,7 @@ class DagBuilder:
                  result_kind: type[Result],
                  depends_on: list[str | Node],
                  use_dependency_results: bool = True,
+                 node_kind: type[Node] = Node,
                  *cb_args,
                  **cb_kwargs
                  ) -> "DagBuilder":
@@ -223,7 +225,7 @@ class DagBuilder:
         Which then forms an arc (from dependencies to the constructed node) to be added in the `Dag`.
         """
         node = self._dag[label] if label in self._dag.node_labels \
-            else Node(
+            else node_kind(
                 label,
                 cb_func,
                 result_kind,

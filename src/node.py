@@ -34,8 +34,8 @@ class Node:
         self.label = label
         self.callback = callback
         self.result_kind = result_kind
-        self.state: NodeStateEnum = NodeStateEnum.IDLE
 
+        self._state: NodeStateEnum = NodeStateEnum.IDLE
         self._use_dependency_results = use_dependency_results
         self._cb_args = cb_args
         self._cb_kwargs = cb_kwargs
@@ -43,9 +43,13 @@ class Node:
     def __str__(self) -> str:
         return self.label
 
+    @property
+    def state(self) -> NodeStateEnum:
+        return self._state
+
     def set_state(self, new_state: NodeStateEnum) -> NodeStateEnum:
-        self.state = new_state
-        return self.state
+        self._state = new_state
+        return self._state
 
     @update_node_state
     def start(self, dependencies: list["Node"], result_io: ResultIO) -> None:
