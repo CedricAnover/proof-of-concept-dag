@@ -44,7 +44,7 @@ class ResultIO(ABC):
         pass
 
     @abstractmethod
-    def read_result(self, node_label: str, result_kind: type[Result], *args, **kwargs) -> Result:
+    def read_result(self, node_label: str, *args, **kwargs) -> Result:
         pass
 
 
@@ -75,7 +75,7 @@ class MemoryResultIO(ResultIO):
     def write_result(self, result: Result, node_label: str) -> None:
         self._result_storage[node_label] = result
 
-    def read_result(self, node_label: str, result_kind: type[Result]) -> Result:
+    def read_result(self, node_label: str) -> Result:
         return self._result_storage[node_label]
 
 
@@ -88,10 +88,10 @@ class LocalResultIO(ResultIO, IFileSystemOperations):
             file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(result.serialize())
 
-    def read_result(self, node_label: str, result_kind: type[Result]) -> Result:
+    def read_result(self, node_label: str) -> Result:
         file_path = self.file_location(node_label)
         obj_str = file_path.read_text()
-        result = result_kind.deserialize(obj_str)
+        result = Result.deserialize(obj_str)
         return result
 
     def create_temp_location(self, *args, **kwargs) -> None:
