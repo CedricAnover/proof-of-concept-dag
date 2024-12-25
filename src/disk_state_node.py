@@ -4,7 +4,7 @@ from typing import Dict
 from abc import ABCMeta
 from pathlib import Path
 
-from .enums import NodeStateEnum
+from .node_state import NodeStateEnum
 from .node import Node
 
 

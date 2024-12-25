@@ -1,7 +1,7 @@
 import functools
 from typing import Callable, Dict
 
-from .enums import NodeStateEnum
+from .node_state import NodeStateEnum
 from .result import *
 
 

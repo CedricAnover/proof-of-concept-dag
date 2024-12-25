@@ -13,7 +13,7 @@ from abc import ABCMeta, ABC, abstractmethod
 from typing import Sequence
 from types import MethodType
 
-from .enums import NodeStateEnum
+from .node_state import NodeStateEnum
 from .result import ResultIO
 from .node import Node
 from .dag import Dag
