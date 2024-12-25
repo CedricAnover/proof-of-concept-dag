@@ -50,3 +50,11 @@ tasks:
     deps: [sample-1, sample-2, sample-3, sample-4, sample-5, sample-6]
     cmds:
       - echo "Taskfile Parallel Done!!!"
+      - echo "Cleaning..."
+      - defer: { task: clean }
+      - echo "Cleaning Complete."
+
+  clean:
+    cmds:
+      - find /tmp -type d -name "*node*" -exec rm -rf {} +
+      - find /tmp -type d -name "*dag*" -exec rm -rf {} +
