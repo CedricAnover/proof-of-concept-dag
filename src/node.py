@@ -28,8 +28,20 @@ class Node:
         return self.label
 
     @property
-    def state(self) -> NodeStateEnum:
+    def state(self) -> NodeState:
         return self._state
+
+    def clean(self):
+        # Clean State File
+        self.state.delete_state_file()
+
+    def get_state_from_file(self) -> Optional[NodeStateEnum]:
+        # Try to read from the state file path if exist
+        try:
+            state_code = self._state.read_state()
+            return NodeStateEnum(state_code) if state_code else None
+        except FileNotFoundError:
+            return None
 
     def change_state(self, complete_state: Optional[NodeStateEnum] = None) -> NodeState:
         match self._state:
@@ -38,7 +50,7 @@ class Node:
             case RunningState():
                 assert complete_state is not None, \
                     "complete_state cannot be None when transitioning to complete state"
-                self._state = self._state.change_state(complete_state)
+                self._state = self._state.change_state(complete_state=complete_state)
             case CompleteState():
                 pass
 

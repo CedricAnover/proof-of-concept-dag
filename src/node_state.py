@@ -42,6 +42,11 @@ class NodeState(ABC):
         file_path.touch(exist_ok=True)
         file_path.write_text(str(new_state.value))
 
+    def delete_state_file(self) -> None:
+        if self._state_storage_dir:
+            file_path = Path(self._state_storage_dir) / self._file_name
+            file_path.unlink(missing_ok=True)
+
 
 class IdleState(NodeState):
     def __init__(self, state_storage_dir=None, file_name=None):

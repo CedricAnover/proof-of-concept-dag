@@ -1,7 +1,6 @@
 import functools
-import inspect
 from collections import deque
-from typing import Sequence, Tuple, Callable
+from typing import Sequence, Tuple, Callable, Optional
 
 from .result import Result
 from .node import Node
@@ -143,7 +142,7 @@ def node_registrator(dag: Dag,
                      label: str,
                      depends_on: list[str | Node] | None = None,
                      use_dependency_results: bool = True,
-                     node_kind: type[Node] = Node,
+                     state_storage_dir: Optional[str] = None
                      ):
     """Decorator for wrapping a custom function as a node to the given DAG."""
     # `node_registrator` only works for non-source nodes.
@@ -155,17 +154,11 @@ def node_registrator(dag: Dag,
         raise TypeError("The dependencies must be a String (label) or Node.")
 
     def outer(cb_func):
-        # Construct a Node instance for the callback
-        # Warn: The callback definition must have a return type hint with the result kind!!!
-        sig = inspect.signature(cb_func)
-        result_kind = sig.return_annotation
-        if result_kind is inspect.Signature.empty:
-            raise TypeError("Provide a type hint for the callback return with a result_kind.")
         node = dag[label] if label in dag.node_labels\
-            else node_kind(
+            else Node(
                 label,
                 cb_func,
-                result_kind,
+                state_storage_dir=state_storage_dir,
                 use_dependency_results=use_dependency_results
             )
 
@@ -206,16 +199,15 @@ class DagBuilder:
         dag_builder.reset()  #<-- Resets the internal states of DagBuilder
         ```
     """
-    def __init__(self):
+    def __init__(self, state_storage_dir: Optional[str] = None,):
         self._dag = Dag()
+        self._state_storage_dir = state_storage_dir
 
     def add_node(self,
                  label: str,
                  cb_func: Callable[["Node", dict[str, Result]], Result],
-                 result_kind: type[Result],
                  depends_on: list[str | Node],
                  use_dependency_results: bool = True,
-                 node_kind: type[Node] = Node,
                  *cb_args,
                  **cb_kwargs
                  ) -> "DagBuilder":
@@ -225,13 +217,13 @@ class DagBuilder:
         Which then forms an arc (from dependencies to the constructed node) to be added in the `Dag`.
         """
         node = self._dag[label] if label in self._dag.node_labels \
-            else node_kind(
+            else Node(
                 label,
                 cb_func,
-                result_kind,
                 *cb_args,
                 use_dependency_results=use_dependency_results,
-                **cb_kwargs,
+                state_storage_dir=self._state_storage_dir,
+                **cb_kwargs
             )
 
         # Register the dependency arc to the DAG
