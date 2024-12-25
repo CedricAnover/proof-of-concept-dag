@@ -61,18 +61,21 @@ class Node:
         self.change_state()
         assert isinstance(self._state, RunningState)
 
+        # Transform Dependencies as Dictionary.
+        # Dict[str -> Result] where the string is the Node Label
         dependency_results = dict()
         if self._use_dependency_results:
             dependency_results: dict[str, Result] = \
                 {dependency.label: result_io.read_result(dependency.label) for dependency in dependencies}
 
-        # Perform Processing and get Result object
+        # Use the Callback and Perform Processing
         result = None
         try:
             result_data: Any = self.callback(self, dependency_results, *self._cb_args, **self._cb_kwargs)
             result = Result.create_success_result(self.label, result_data)
             self.change_state(complete_state=NodeStateEnum.COMPLETE_SUCCESS)
         except Exception as err:
+            # Instead of throwing an error and stopping the flow, we create a failed result.
             result = Result.create_fail_result(self.label, str(err))
             self.change_state(complete_state=NodeStateEnum.COMPLETE_FAIL)
         finally:
