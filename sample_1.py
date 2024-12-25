@@ -24,11 +24,6 @@ def my_callback(node: Node, dep_results: dict[str, Result], message=None) -> Any
             print(f"Dependency {dep_label} has failed")
 
     return f"node-{node.label}-data"
-    # return Result(
-    #     node_label=node.label,
-    #     is_success=True,
-    #     data=f"node-{node.label}-data",
-    # )
 
 
 def fail_callback(node: Node, dep_results: dict[str, Result], message=None) -> Any:

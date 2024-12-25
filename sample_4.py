@@ -1,40 +1,39 @@
 """Example: ThreadPoolConduit"""
 
-import time
-import random
-from dataclasses import dataclass
+import uuid
+import tempfile
+from pathlib import Path
 
-from src.conduit import ThreadPoolConduit
-from src.result import JsonResult, LocalResultIO
+from src.conduit import ThreadPoolConduit, AsyncConduit
+from src.result import Result, LocalResultIO
 from src.dag import Dag
 from src.node import Node
 
 
-@dataclass
-class CustomResult(JsonResult):
-    stdout: str
-    stderr: str
+USE_MEMORY = False
+STATE_STORAGE = str(Path(tempfile.gettempdir()).resolve() / f"node-states-{uuid.uuid4()}") \
+    if not USE_MEMORY else None
 
 
-def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) -> CustomResult:
+def my_callback(node: Node, dep_results: dict[str, Result], message=None):
     if message:
         print(f"[node-{node.label}] Dependency Results - {dep_results} | Message: {message}")
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
-    # Simulate long-running process
-    time.sleep(random.randint(1, 2))
-    return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
+
+    result_data = (f"{node.label}-stdout", f"{node.label}-stderr")
+    return result_data
 
 
 if __name__ == "__main__":
-    node_1 = Node("1", my_callback, CustomResult)
-    node_2 = Node("2", my_callback, CustomResult, message="Hello World")
-    node_3 = Node("3", my_callback, CustomResult)
-    node_4 = Node("4", my_callback, CustomResult)
-    node_5 = Node("5", my_callback, CustomResult)
-    node_6 = Node("6", my_callback, CustomResult, message="Some Message")
-    node_7 = Node("7", my_callback, CustomResult)
-    node_8 = Node("8", my_callback, CustomResult)
+    node_1 = Node("1", my_callback, state_storage_dir=STATE_STORAGE)
+    node_2 = Node("2", my_callback, state_storage_dir=STATE_STORAGE, message="Hello World")
+    node_3 = Node("3", my_callback, state_storage_dir=STATE_STORAGE)
+    node_4 = Node("4", my_callback, state_storage_dir=STATE_STORAGE)
+    node_5 = Node("5", my_callback, state_storage_dir=STATE_STORAGE)
+    node_6 = Node("6", my_callback, state_storage_dir=STATE_STORAGE, message="Some Message")
+    node_7 = Node("7", my_callback, state_storage_dir=STATE_STORAGE)
+    node_8 = Node("8", my_callback, state_storage_dir=STATE_STORAGE)
 
     dag = Dag()
     dag.add_arc(node_1, node_3)
@@ -51,5 +50,8 @@ if __name__ == "__main__":
     print()
 
     res_io = LocalResultIO()
-    async_conduit = ThreadPoolConduit.create_with_clean_start(dag, res_io, max_workers=10)
+    # TODO: Fix - The process halts and does not proceed at nodes 4 & 5 when using `ThreadPoolConduit`
+    # [node-5] Ready for execution.
+    # [node-4] Ready for execution.
+    async_conduit = AsyncConduit(dag, res_io)
     async_conduit.start()

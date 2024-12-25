@@ -1,34 +1,28 @@
-from dataclasses import dataclass
-
-from src.conduit import AsyncConduit, ParallelConduits
-from src.result import JsonResult, LocalResultIO
+from src.conduit import AsyncConduit, ThreadPoolConduit, ParallelConduits
+from src.result import Result, LocalResultIO
 from src.dag import Dag
 from src.node import Node
 
 
-@dataclass
-class CustomResult(JsonResult):
-    stdout: str
-    stderr: str
-
-
-def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) -> CustomResult:
+def my_callback(node: Node, dep_results: dict[str, Result], message=None):
     if message:
         print(f"[node-{node.label}] Dependency Results - {dep_results} | Message: {message}")
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
-    return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
+
+    result_data = f"{node.label}-stdout", f"{node.label}-stderr"
+    return result_data
 
 
 def create_dag() -> Dag:
-    node_1 = Node("1", my_callback, CustomResult)
-    node_2 = Node("2", my_callback, CustomResult, message="Hello World")
-    node_3 = Node("3", my_callback, CustomResult)
-    node_4 = Node("4", my_callback, CustomResult)
-    node_5 = Node("5", my_callback, CustomResult)
-    node_6 = Node("6", my_callback, CustomResult, message="Some Message")
-    node_7 = Node("7", my_callback, CustomResult)
-    node_8 = Node("8", my_callback, CustomResult)
+    node_1 = Node("1", my_callback)
+    node_2 = Node("2", my_callback, message="Hello World")
+    node_3 = Node("3", my_callback)
+    node_4 = Node("4", my_callback)
+    node_5 = Node("5", my_callback)
+    node_6 = Node("6", my_callback, message="Some Message")
+    node_7 = Node("7", my_callback)
+    node_8 = Node("8", my_callback)
 
     dag = Dag()
     dag.add_arc(node_1, node_3)
@@ -53,7 +47,7 @@ def main():
     for _ in range(max_processors):
         dag = create_dag()
         res_io = LocalResultIO()
-        async_conduit = AsyncConduit.create_with_clean_start(dag, res_io)
+        async_conduit = AsyncConduit(dag, res_io)
         parallel_conduits.add_conduit(async_conduit)
 
     parallel_conduits.start()
