@@ -1,4 +1,4 @@
-from typing import Callable, Dict, Optional
+from typing import Callable, Dict, Optional, Any
 
 from .node_state import NodeStateEnum, NodeState, IdleState, RunningState, CompleteState
 from .result import Result, ResultIO
@@ -7,7 +7,7 @@ from .result import Result, ResultIO
 class Node:
     def __init__(self,
                  label: str,
-                 callback: Callable[["Node", Dict[str, Result]], Result],
+                 callback: Callable[["Node", Dict[str, Result]], Any],
                  use_dependency_results: bool = True,
                  state_storage_dir: Optional[str] = None,
                  *cb_args,
@@ -69,7 +69,8 @@ class Node:
         # Perform Processing and get Result object
         result = None
         try:
-            result = self.callback(self, dependency_results, *self._cb_args, **self._cb_kwargs)
+            result_data: Any = self.callback(self, dependency_results, *self._cb_args, **self._cb_kwargs)
+            result = Result.create_success_result(self.label, result_data)
             self.change_state(complete_state=NodeStateEnum.COMPLETE_SUCCESS)
         except Exception as err:
             result = Result.create_fail_result(self.label, str(err))

@@ -1,5 +1,6 @@
 import tempfile
 from pathlib import Path
+from typing import Any
 
 from src.conduit import AsyncConduit
 from src.result import Result, LocalResultIO
@@ -12,7 +13,7 @@ STATE_STORAGE = str(Path(tempfile.gettempdir()).resolve() / "node-states") \
     if not USE_MEMORY else None
 
 
-def my_callback(node: Node, dep_results: dict[str, Result], message=None) -> Result:
+def my_callback(node: Node, dep_results: dict[str, Result], message=None) -> Any:
     if message:
         print(f"[node-{node.label}] Dependency Results - {dep_results} | Message: {message}")
     else:
@@ -22,14 +23,15 @@ def my_callback(node: Node, dep_results: dict[str, Result], message=None) -> Res
         if not dep_result.is_success:
             print(f"Dependency {dep_label} has failed")
 
-    return Result(
-        node_label=node.label,
-        is_success=True,
-        data=f"node-{node.label}-data",
-    )
+    return f"node-{node.label}-data"
+    # return Result(
+    #     node_label=node.label,
+    #     is_success=True,
+    #     data=f"node-{node.label}-data",
+    # )
 
 
-def fail_callback(node: Node, dep_results: dict[str, Result], message=None) -> Result:
+def fail_callback(node: Node, dep_results: dict[str, Result], message=None) -> Any:
     raise Exception("Simulated Error.")
 
 

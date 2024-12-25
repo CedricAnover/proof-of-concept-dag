@@ -1,8 +1,7 @@
 """Example: Using `DagBuilder` to construct `Dag`.
 """
-import random
 from pprint import pprint
-from dataclasses import dataclass
+from typing import Any
 
 from src.conduit import AsyncConduit, ThreadPoolConduit
 from src.result import Result, LocalResultIO
@@ -10,7 +9,7 @@ from src.dag import DagBuilder
 from src.node import Node
 
 
-def my_callback(node: Node, dep_results: dict[str, Result], message=None, use_print=True) -> Result:
+def my_callback(node: Node, dep_results: dict[str, Result], message=None, use_print=True) -> Any:
     if use_print:
         print(f"[node-{node.label}]", end=" ")
         pprint(dep_results, indent=2)
@@ -18,11 +17,7 @@ def my_callback(node: Node, dep_results: dict[str, Result], message=None, use_pr
     if message:
         print(f"[node-{node.label}] {message}")
 
-    return Result(
-        node_label=node.label,
-        is_success=True,
-        data=f"node-{node.label}-data"
-    )
+    return f"node-{node.label}-data"
 
 
 if __name__ == "__main__":

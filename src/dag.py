@@ -1,6 +1,6 @@
 import functools
 from collections import deque
-from typing import Sequence, Tuple, Callable, Optional
+from typing import Sequence, Tuple, Callable, Optional, Any
 
 from .result import Result
 from .node import Node
@@ -153,7 +153,7 @@ def node_registrator(dag: Dag,
     if any(not isinstance(dep, (str, Node)) for dep in depends_on):
         raise TypeError("The dependencies must be a String (label) or Node.")
 
-    def outer(cb_func):
+    def outer(cb_func: Callable[["Node", dict[str, Result]], Any]):
         node = dag[label] if label in dag.node_labels\
             else Node(
                 label,
@@ -205,7 +205,7 @@ class DagBuilder:
 
     def add_node(self,
                  label: str,
-                 cb_func: Callable[["Node", dict[str, Result]], Result],
+                 cb_func: Callable[["Node", dict[str, Result]], Any],
                  depends_on: list[str | Node],
                  use_dependency_results: bool = True,
                  *cb_args,
