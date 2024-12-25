@@ -8,10 +8,10 @@ class Node:
     def __init__(self,
                  label: str,
                  callback: Callable[["Node", Dict[str, Result]], Result],
-                 *cb_args,
                  use_dependency_results: bool = True,
                  state_storage_dir: Optional[str] = None,
-                 **cb_kwargs
+                 *cb_args,
+                 **cb_kwargs,
                  ) -> None:
         self.label = label
         self.callback = callback

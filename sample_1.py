@@ -1,37 +1,46 @@
-import time
-import random
-from dataclasses import dataclass
+import tempfile
+from pathlib import Path
 
 from src.conduit import AsyncConduit
-from src.result import JsonResult, LocalResultIO
+from src.result import Result, LocalResultIO
 from src.dag import Dag
 from src.node import Node
 
 
-@dataclass
-class CustomResult(JsonResult):
-    stdout: str
-    stderr: str
+USE_MEMORY = False
+STATE_STORAGE = str(Path(tempfile.gettempdir()).resolve() / "node-states") \
+    if not USE_MEMORY else None
 
 
-def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) -> CustomResult:
+def my_callback(node: Node, dep_results: dict[str, Result], message=None) -> Result:
     if message:
         print(f"[node-{node.label}] Dependency Results - {dep_results} | Message: {message}")
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
-    # Simulate long-running process
-    time.sleep(random.randint(1, 2))
-    return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
+
+    for dep_label, dep_result in dep_results.items():
+        if not dep_result.is_success:
+            print(f"Dependency {dep_label} has failed")
+
+    return Result(
+        node_label=node.label,
+        is_success=True,
+        data=f"node-{node.label}-data",
+    )
 
 
-node_1 = Node("1", my_callback, CustomResult)
-node_2 = Node("2", my_callback, CustomResult, message="Hello World")
-node_3 = Node("3", my_callback, CustomResult)
-node_4 = Node("4", my_callback, CustomResult)
-node_5 = Node("5", my_callback, CustomResult)
-node_6 = Node("6", my_callback, CustomResult, message="Some Message")
-node_7 = Node("7", my_callback, CustomResult)
-node_8 = Node("8", my_callback, CustomResult)
+def fail_callback(node: Node, dep_results: dict[str, Result], message=None) -> Result:
+    raise Exception("Simulated Error.")
+
+
+node_1 = Node("1", my_callback, state_storage_dir=STATE_STORAGE)
+node_2 = Node("2", my_callback, state_storage_dir=STATE_STORAGE, message="Hello World")
+node_3 = Node("3", fail_callback, state_storage_dir=STATE_STORAGE)
+node_4 = Node("4", my_callback, state_storage_dir=STATE_STORAGE)
+node_5 = Node("5", my_callback, state_storage_dir=STATE_STORAGE)
+node_6 = Node("6", my_callback, state_storage_dir=STATE_STORAGE, message="Some Message")
+node_7 = Node("7", my_callback, state_storage_dir=STATE_STORAGE)
+node_8 = Node("8", my_callback, state_storage_dir=STATE_STORAGE)
 
 dag = Dag()
 dag.add_arc(node_1, node_3)
@@ -48,5 +57,5 @@ for src, dst in dag.arcs:
 print()
 
 res_io = LocalResultIO()
-async_conduit = AsyncConduit.create_with_clean_start(dag, res_io)
+async_conduit = AsyncConduit(dag, res_io)
 async_conduit.start()

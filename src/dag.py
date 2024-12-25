@@ -220,10 +220,10 @@ class DagBuilder:
             else Node(
                 label,
                 cb_func,
-                *cb_args,
                 use_dependency_results=use_dependency_results,
                 state_storage_dir=self._state_storage_dir,
-                **cb_kwargs
+                *cb_args,
+                **cb_kwargs,
             )
 
         # Register the dependency arc to the DAG
