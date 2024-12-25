@@ -13,7 +13,7 @@ from abc import ABCMeta, ABC, abstractmethod
 from typing import Sequence
 from types import MethodType
 
-from .node_state import NodeStateEnum
+from .node_state import NodeStateEnum, NodeState, IdleState, RunningState, CompleteState
 from .result import ResultIO
 from .node import Node
 from .dag import Dag
@@ -28,18 +28,31 @@ class Conduit(ABC):
         self.dag = dag
         self.result_io = result_io
 
+        # Create temporary location if ResultIO instance have `create_temp_location`
+        if hasattr(self.result_io, "create_temp_location"):
+            self.result_io.create_temp_location()
+
     @abstractmethod
     def start(self, *args, **kwargs) -> None:
         pass
 
-    def get_nodes(self, node_state: NodeStateEnum) -> Sequence[Node]:
-        return [node for node in self.dag.nodes if node.state == node_state]
+    def get_nodes(self, node_state: NodeState) -> Sequence[Node]:
+        return [node for node in self.dag.nodes if isinstance(node.state, node_state)]
 
     def are_all_nodes_complete(self) -> bool:
-        return all(node.state == NodeStateEnum.COMPLETE for node in self.dag.nodes)
+        return all(isinstance(node.state, CompleteState) for node in self.dag.nodes)
 
     def is_node_ready(self, node: Node) -> bool:
-        return all(dep.state == NodeStateEnum.COMPLETE for dep in self.dag.direct_dependencies(node))
+        return all(isinstance(dep.state, CompleteState) for dep in self.dag.direct_dependencies(node))
+
+    def clean(self):
+        # Delete all Node State Files
+        for node in self.dag.nodes:
+            node.clean()
+
+        # Delete Temporary Location, if ResultIO instance have `delete_temp_location`
+        if hasattr(self.result_io, "delete_temp_location"):
+            self.result_io.delete_temp_location()
 
 
 class ParallelConduits:
@@ -173,7 +186,7 @@ class ConduitFactoryMixin(ABCMeta):
         return instance
 
 
-class AsyncConduit(Conduit, metaclass=ConduitFactoryMixin):
+class AsyncConduit(Conduit):
     def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10):
         super().__init__(dag, result_io)
         self.concurrency_limit = concurrency_limit
@@ -195,7 +208,7 @@ class AsyncConduit(Conduit, metaclass=ConduitFactoryMixin):
     async def _execute_ready_nodes(self, semaphore: asyncio.Semaphore) -> None:
         """Find READY nodes and execute them asynchronously within concurrency limits."""
         tasks = []
-        for node in self.get_nodes(NodeStateEnum.IDLE):
+        for node in self.get_nodes(IdleState):
             if self.is_node_ready(node):
                 print(f"[node-{node.label}] Ready for execution.")
                 dependencies = self.dag.direct_dependencies(node)
@@ -225,10 +238,14 @@ class AsyncConduit(Conduit, metaclass=ConduitFactoryMixin):
 
     def start(self) -> None:
         """Start the DAG execution."""
-        asyncio.run(self._main_loop())
+        try:
+            asyncio.run(self._main_loop())
+        finally:
+            # TODO: Add result backup or transfer
+            self.clean()
 
 
-class ThreadPoolConduit(Conduit, metaclass=ConduitFactoryMixin):
+class ThreadPoolConduit(Conduit):
     def __init__(self, dag: Dag, result_io: ResultIO, *pool_args, **pool_kwargs):
         super().__init__(dag, result_io)
         self._pool_args = pool_args
@@ -248,7 +265,7 @@ class ThreadPoolConduit(Conduit, metaclass=ConduitFactoryMixin):
 
         # Keep submitting tasks for all ready nodes
         while not self.are_all_nodes_complete():
-            for node in self.get_nodes(NodeStateEnum.IDLE):
+            for node in self.get_nodes(IdleState):
                 if node not in self._submitted_nodes and self.is_node_ready(node):
                     dependencies = self.dag.direct_dependencies(node)
                     print(f"[node-{node.label}] Ready for execution.")
@@ -272,4 +289,8 @@ class ThreadPoolConduit(Conduit, metaclass=ConduitFactoryMixin):
 
     def start(self) -> None:
         """Start the DAG execution."""
-        self._main_loop()
+        try:
+            self._main_loop()
+        finally:
+            # TODO: Add result backup or transfer
+            self.clean()
