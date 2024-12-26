@@ -67,7 +67,6 @@ def main():
 
         # conduit = ThreadConduit(dag)
         conduit = ThreadPoolConduit(dag)
-        conduit.start()
         parallel_conduits.add_conduit(conduit)
 
         # res_io = LocalResultIO()
