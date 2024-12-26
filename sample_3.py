@@ -1,88 +1,84 @@
-"""Heterogeneous Result Kind
-"""
-import time
-import random
-from dataclasses import dataclass
+"""Example: Using `ParallelConduits` to run multiple conduits in parallel."""
 
-from src.conduit import AsyncConduit
-from src.result import JsonResult, LocalResultIO
-from src.dag import Dag, node_registrator
+import random
+
+from src.conduit import AsyncConduit, ParallelConduits, ThreadConduit, ThreadPoolConduit
+from src.result import Result, LocalResultIO, MemoryResultIO
+from src.dag import Dag
 from src.node import Node
 
 
-@dataclass
-class CustomResult(JsonResult):
-    stdout: str
-    stderr: str
-
-
-@dataclass
-class CustomResultB(JsonResult):
-    """This custom result kind is used for demonstrating 'heterogeneous result kind'."""
-    stdout: str
-
-
-# Define a callback for Source nodes
-def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) -> CustomResult:
+def my_callback(node: Node, dep_results: dict[str, Result], message=None):
     if message:
         print(f"[node-{node.label}] Dependency Results - {dep_results} | Message: {message}")
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
-    # Simulate long-running process
-    time.sleep(random.randint(1, 2))
-    return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
+    
+    result_data = (f"{node.label}-stdout", f"{node.label}-stderr")
+    return result_data
 
 
-# Create a Dag instance
-dag = Dag()
+def create_dag() -> Dag:
+    node_1 = Node("1", my_callback)
+    node_2 = Node("2", my_callback, message="Hello World")
+    node_3 = Node("3", my_callback)
+    node_4 = Node("4", my_callback)
+    node_5 = Node("5", my_callback)
+    node_6 = Node("6", my_callback, message="Some Message")
+    node_7 = Node("7", my_callback)
+    node_8 = Node("8", my_callback)
 
-# Create the Source Nodes
-node_1 = Node("1", my_callback, CustomResult)
-node_2 = Node("2", my_callback, CustomResult, message="Hello World")
+    dag = Dag()
+    dag.add_arc(node_1, node_3)
+    dag.add_arc(node_2, node_3)
+    dag.add_arc(node_3, node_4)
+    dag.add_arc(node_3, node_5)
+    dag.add_arc(node_5, node_6)
+    dag.add_arc(node_4, node_7)
+    dag.add_arc(node_7, node_8)
+    dag.add_arc(node_6, node_7)
 
-
-def _cb_func(node, dep_results):
-    res = CustomResultB(f"{node.label}-stdout")
-    # print(f"[node-{node.label}] {dep_results}")
-    print(f"[node-{node.label}] {res}")
-    return res
-
-
-# "Non-Source" nodes dependent on "Source" nodes must use a `Node` object instead of strings.
-@node_registrator(dag, "3", depends_on=[node_1, node_2])
-def cb_3(node, dep_results) -> CustomResultB:
-    return _cb_func(node, dep_results)
-
-
-@node_registrator(dag, "4", depends_on=["3"])
-def cb_4(node, dep_results) -> CustomResultB:
-    return _cb_func(node, dep_results)
-
-
-@node_registrator(dag, "5", depends_on=["3"])
-def cb_5(node, dep_results) -> CustomResultB:
-    return _cb_func(node, dep_results)
+    for src, dst in dag.arcs:
+        print(f"{src} --> {dst}")
+    print()
+    return dag
 
 
-@node_registrator(dag, "6", depends_on=["5"])
-def cb_6(node, dep_results) -> CustomResultB:
-    return _cb_func(node, dep_results)
+def random_conduit(dag: Dag) -> AsyncConduit | ThreadConduit | ThreadPoolConduit:
+    def random_result_io() -> LocalResultIO | MemoryResultIO:
+        rand_result_io = random.choice([LocalResultIO, MemoryResultIO])
+        return rand_result_io()
+
+    rand_conduit_cls = random.choice([AsyncConduit, ThreadConduit, ThreadPoolConduit])
+
+    if rand_conduit_cls is AsyncConduit:
+        rand_res_io = random_result_io()
+        return rand_conduit_cls(dag, rand_res_io)
+
+    return rand_conduit_cls(dag)
 
 
-@node_registrator(dag, "7", depends_on=["4", "6"])
-def cb_7(node, dep_results) -> CustomResultB:
-    return _cb_func(node, dep_results)
+def main():
+    max_processors = 4
+
+    parallel_conduits = ParallelConduits("my-parallel-conduits", max_processors=max_processors)
+    for _ in range(max_processors):
+        dag = create_dag()
+
+        # conduit = ThreadConduit(dag)
+        conduit = ThreadPoolConduit(dag)
+        conduit.start()
+        parallel_conduits.add_conduit(conduit)
+
+        # res_io = LocalResultIO()
+        # async_conduit = AsyncConduit(dag, res_io)
+        # parallel_conduits.add_conduit(async_conduit)
+
+        # rand_conduit = random_conduit(dag)
+        # parallel_conduits.add_conduit(rand_conduit)
+
+    parallel_conduits.start()
 
 
-@node_registrator(dag, "8", depends_on=["7"])
-def cb_7(node, dep_results) -> CustomResultB:
-    return _cb_func(node, dep_results)
-
-
-for src, dst in dag.arcs:
-    print(f"{src} --> {dst}")
-print()
-
-res_io = LocalResultIO()
-async_conduit = AsyncConduit.create_with_clean_start(dag, res_io)
-async_conduit.start()
+if __name__ == "__main__":
+    main()

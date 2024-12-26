@@ -1,55 +1,48 @@
-"""Example: ThreadPoolConduit"""
+"""Example: Using `DagBuilder` to construct `Dag`."""
 
-import time
-import random
-from dataclasses import dataclass
+from pprint import pprint
 
-from src.conduit import ThreadPoolConduit
-from src.result import JsonResult, LocalResultIO
-from src.dag import Dag
+from src.conduit import AsyncConduit, ThreadConduit, ThreadPoolConduit
+from src.result import Result, LocalResultIO, MemoryResultIO
+from src.dag import DagBuilder
 from src.node import Node
 
 
-@dataclass
-class CustomResult(JsonResult):
-    stdout: str
-    stderr: str
+def my_callback(node: Node, dep_results: dict[str, Result], message=None, use_print=True):
+    if use_print:
+        print(f"[node-{node.label}]", end=" ")
+        pprint(dep_results, indent=2)
 
-
-def my_callback(node: Node, dep_results: dict[str, CustomResult], message=None) -> CustomResult:
     if message:
-        print(f"[node-{node.label}] Dependency Results - {dep_results} | Message: {message}")
-    else:
-        print(f"[node-{node.label}] Dependency Results - {dep_results}")
-    # Simulate long-running process
-    time.sleep(random.randint(1, 2))
-    return CustomResult(f"{node.label}-stdout", f"{node.label}-stderr")
+        print(f"[node-{node.label}] {message}")
+
+    return f"node-{node.label}-result"
 
 
 if __name__ == "__main__":
-    node_1 = Node("1", my_callback, CustomResult)
-    node_2 = Node("2", my_callback, CustomResult, message="Hello World")
-    node_3 = Node("3", my_callback, CustomResult)
-    node_4 = Node("4", my_callback, CustomResult)
-    node_5 = Node("5", my_callback, CustomResult)
-    node_6 = Node("6", my_callback, CustomResult, message="Some Message")
-    node_7 = Node("7", my_callback, CustomResult)
-    node_8 = Node("8", my_callback, CustomResult)
+    # Source Nodes
+    node_1 = Node("1", my_callback)
+    node_2 = Node("2", my_callback, message="Hello World")
 
-    dag = Dag()
-    dag.add_arc(node_1, node_3)
-    dag.add_arc(node_2, node_3)
-    dag.add_arc(node_3, node_4)
-    dag.add_arc(node_3, node_5)
-    dag.add_arc(node_5, node_6)
-    dag.add_arc(node_4, node_7)
-    dag.add_arc(node_7, node_8)
-    dag.add_arc(node_6, node_7)
+    # Construct a Dag with DagBuilder
+    dag_builder = DagBuilder()
+    dag_builder.add_node("3", my_callback, depends_on=[node_1, node_2])
+    dag_builder.add_node("4", my_callback, depends_on=["3", node_1], message="Foo Bar")
+    dag_builder.add_node("5", my_callback, depends_on=["3"])
+    dag_builder.add_node("6", my_callback, depends_on=["5"], message="Hello World")
+    dag_builder.add_node("7", my_callback, depends_on=["4", "6"])
+    dag_builder.add_node("8", my_callback, depends_on=["7"])
+    dag = dag_builder.build()
 
     for src, dst in dag.arcs:
         print(f"{src} --> {dst}")
     print()
 
-    res_io = LocalResultIO()
-    async_conduit = ThreadPoolConduit.create_with_clean_start(dag, res_io, max_workers=10)
-    async_conduit.start()
+    conduit = ThreadPoolConduit(dag)
+    # conduit = ThreadConduit(dag)
+    conduit.start()
+
+    # res_io = LocalResultIO()
+    # res_io = MemoryResultIO()
+    # conduit = AsyncConduit(dag, res_io)
+    # conduit.start()
