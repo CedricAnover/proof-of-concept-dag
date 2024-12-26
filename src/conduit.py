@@ -7,14 +7,14 @@ import math
 import time
 import functools
 import os
+import threading
 from multiprocessing import Process, cpu_count
 from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, Future
 from abc import ABCMeta, ABC, abstractmethod
 from typing import Sequence
-from types import MethodType
 
 from .enums import NodeStateEnum
-from .result import ResultIO
+from .result import ResultIO, MemoryResultIO
 from .node import Node
 from .dag import Dag
 
@@ -28,18 +28,18 @@ class Conduit(ABC):
         self.dag = dag
         self.result_io = result_io
 
-    @abstractmethod
-    def start(self, *args, **kwargs) -> None:
-        pass
-
     def get_nodes(self, node_state: NodeStateEnum) -> Sequence[Node]:
         return [node for node in self.dag.nodes if node.state == node_state]
 
     def are_all_nodes_complete(self) -> bool:
-        return all(node.state == NodeStateEnum.COMPLETE for node in self.dag.nodes)
+        return all(node.state in [NodeStateEnum.COMPLETE_SUCCESS, NodeStateEnum.COMPLETE_FAIL] for node in self.dag.nodes)
 
     def is_node_ready(self, node: Node) -> bool:
-        return all(dep.state == NodeStateEnum.COMPLETE for dep in self.dag.direct_dependencies(node))
+        return all(dep.state in [NodeStateEnum.COMPLETE_SUCCESS, NodeStateEnum.COMPLETE_FAIL] for dep in self.dag.direct_dependencies(node))
+
+    @abstractmethod
+    def start(self, *args, **kwargs) -> None:
+        pass
 
 
 class ParallelConduits:
@@ -78,102 +78,7 @@ class ParallelConduits:
             proc.join()
 
 
-class ConduitFactoryMixin(ABCMeta):
-    def __new__(mcls, name, bases, attrs, /, *mcls_args, **mcls_kwargs):
-        # Attach the New Factory Methods
-        attrs["create_with_clean_start"] = classmethod(mcls.create_with_clean_start)
-        attrs["create_with_result_backup"] = classmethod(mcls.create_with_result_backup)
-
-        new_cls = super().__new__(mcls, name, bases, attrs, *mcls_args, **mcls_kwargs)
-        return new_cls
-
-    @staticmethod
-    def create_with_clean_start(cls,
-                                *conduit_args,
-                                delete_temp_location: bool = True,
-                                delete_args=(),
-                                delete_kwargs=None,
-                                create_args=(),
-                                create_kwargs=None,
-                                **conduit_kwargs
-                                ) -> type[Conduit]:
-        """
-        Conduit Factory Method that overrides the original Conduit.start method to delete
-        and re-create a temporary directory before starting the conduit.
-        """
-        instance = cls(*conduit_args, **conduit_kwargs)
-
-        delete_kwargs = delete_kwargs or dict()
-        create_kwargs = create_kwargs or dict()
-
-        # Store the original start before modifications
-        original_start = instance.start
-
-        # Define the new start method
-        def start(self, *args, **kwargs):
-            assert hasattr(self, "result_io"), "The instance does not have 'result_io' field."
-
-            # Create the temporary location for storing results
-            if hasattr(self.result_io, "delete_temp_location"):
-                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
-            if hasattr(self.result_io, "create_temp_location"):
-                # Create Temporary Location
-                self.result_io.create_temp_location(*create_args, **create_kwargs)
-
-            # Invoke the original start method but dont pass `self`
-            original_start(*args, **kwargs)
-
-            # Delete Temporary Location, if specified
-            if delete_temp_location and hasattr(self.result_io, "delete_temp_location"):
-                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
-
-        # Modify the start method to create a temporary directory before running.
-        instance.start = start.__get__(instance)
-        return instance
-
-    @staticmethod
-    def create_with_result_backup(cls: type[Conduit],
-                                  backup_location: str,
-                                  *conduit_args,
-                                  delete_args=(),
-                                  delete_kwargs=None,
-                                  create_args=(),
-                                  create_kwargs=None,
-                                  **conduit_kwargs
-                                  ) -> type[Conduit]:
-        instance = cls(*conduit_args, **conduit_kwargs)
-
-        delete_kwargs = delete_kwargs or dict()
-        create_kwargs = create_kwargs or dict()
-
-        # Store the original start before modifications
-        original_start = instance.start
-
-        # Define the new start method
-        def start(self, *args, **kwargs):
-            # Delete and Create the Temporary Location
-            assert hasattr(self, "result_io"), "The instance does not have 'result_io' field."
-            if hasattr(self.result_io, "delete_temp_location"):
-                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
-            if hasattr(self.result_io, "create_temp_location"):
-                self.result_io.create_temp_location(*create_args, **create_kwargs)
-
-            # Invoke the original start method but dont pass `self`
-            original_start(*args, **kwargs)
-
-            # Backup/Transfer the Results to a new location
-            if hasattr(self.result_io, "delete_temp_location"):
-                if backup_location and hasattr(self.result_io, "transfer_results"):
-                    # Backup Results to new location
-                    self.result_io.transfer_results(backup_location)
-                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
-
-        # Modify the start() method to create a temporary directory before running.
-        instance.start = start.__get__(instance)
-        return instance
-
-
-class AsyncConduit(Conduit, metaclass=ConduitFactoryMixin):
+class AsyncConduit(Conduit):
     def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10):
         super().__init__(dag, result_io)
         self.concurrency_limit = concurrency_limit
@@ -228,8 +133,9 @@ class AsyncConduit(Conduit, metaclass=ConduitFactoryMixin):
         asyncio.run(self._main_loop())
 
 
-class ThreadPoolConduit(Conduit, metaclass=ConduitFactoryMixin):
-    def __init__(self, dag: Dag, result_io: ResultIO, *pool_args, **pool_kwargs):
+class ThreadPoolConduit(Conduit):
+    def __init__(self, dag: Dag, *pool_args, **pool_kwargs):
+        result_io = MemoryResultIO()  # Thread-based conduit only works with MemoryResultIO
         super().__init__(dag, result_io)
         self._pool_args = pool_args
         self._pool_kwargs = pool_kwargs
@@ -273,3 +179,35 @@ class ThreadPoolConduit(Conduit, metaclass=ConduitFactoryMixin):
     def start(self) -> None:
         """Start the DAG execution."""
         self._main_loop()
+
+
+class ThreadConduit(Conduit):
+    def __init__(self, dag):
+        result_io = MemoryResultIO()  # Thread-based conduit only works with MemoryResultIO
+        super().__init__(dag, result_io)
+
+    def _main_loop(self) -> None:
+        threads: list[threading.Thread] = []
+
+        # Start the source nodes as Thread
+        for src_node in self.dag.sources:
+            dependencies = self.dag.direct_dependencies(src_node)
+            thread = threading.Thread(target=src_node.start, name=src_node.label, args=(dependencies, self.result_io))
+            thread.start()
+            threads.append(thread)
+
+        # Start the non-source nodes who are ready as Thread
+        while not self.are_all_nodes_complete():
+            for node in self.get_nodes(NodeStateEnum.IDLE):
+                if self.is_node_ready(node):
+                    dependencies = self.dag.direct_dependencies(node)
+                    thread = threading.Thread(target=node.start, name=node.label, args=(dependencies, self.result_io))
+                    thread.start()
+                    threads.append(thread)
+
+        # Join all threads
+        for thread in threads:
+            thread.join()
+
+    def start(self, *args, **kwargs) -> None:
+        self._main_loop(*args, **kwargs)

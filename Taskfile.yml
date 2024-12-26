@@ -2,21 +2,6 @@ version: '3'
 
 silent: true
 
-# Examples:
-# task run-samples-parallel
-# task --parallel sample-1 sample-2
-
-# dotenv:
-#   - .env
-
-# Template Variables
-# vars:
-#   GREETING: Hello, World!
-
-# Environment Variables
-# env:
-#   ENV_VAR_1: value1
-
 tasks:
   default:
     cmds:
