@@ -1,7 +1,6 @@
 import functools
-import inspect
 from collections import deque
-from typing import Sequence, Tuple, Callable
+from typing import Sequence, Tuple, Callable, Any
 
 from .result import Result
 from .node import Node
@@ -142,8 +141,8 @@ class Dag:
 def node_registrator(dag: Dag,
                      label: str,
                      depends_on: list[str | Node] | None = None,
-                     use_dependency_results: bool = True,
-                     node_kind: type[Node] = Node,
+                     use_deps: bool = True,
+                     raise_error: bool = False,
                      ):
     """Decorator for wrapping a custom function as a node to the given DAG."""
     # `node_registrator` only works for non-source nodes.
@@ -155,19 +154,8 @@ def node_registrator(dag: Dag,
         raise TypeError("The dependencies must be a String (label) or Node.")
 
     def outer(cb_func):
-        # Construct a Node instance for the callback
-        # Warn: The callback definition must have a return type hint with the result kind!!!
-        sig = inspect.signature(cb_func)
-        result_kind = sig.return_annotation
-        if result_kind is inspect.Signature.empty:
-            raise TypeError("Provide a type hint for the callback return with a result_kind.")
-        node = dag[label] if label in dag.node_labels\
-            else node_kind(
-                label,
-                cb_func,
-                result_kind,
-                use_dependency_results=use_dependency_results
-            )
+        node = dag[label] if label in dag.node_labels \
+            else Node(label, cb_func, use_deps=use_deps, raise_error=raise_error)
 
         for dependency in depends_on:
             if isinstance(dependency, str):
@@ -187,51 +175,26 @@ def node_registrator(dag: Dag,
 
 
 class DagBuilder:
-    """
-    Builder object for constructing a DAG.
-
-    This serves as an alternative to the `node_registrator` decorator for building a DAG using the Builder Pattern.
-
-    Similar to `node_registrator`, adding source nodes requires using a `Node` object in the `depends_on` list parameter.
-
-    Example:
-        ```
-        # Generic Usage
-        node_1 = Node(...)  #<-- Source Node
-        dag_builder = DagBuilder()
-        dag_builder.add_node("node_label_2", cb_func_2, SomeCustomResult, depends_on=[node_1], *cb_args, **cb_kwargs)
-        dag_builder.add_node("node_label_3", cb_func_3, SomeCustomResult, depends_on=["node_label_2", node_1], *cb_args, **cb_kwargs)
-        ...
-        dag = dag_builder.build()
-        dag_builder.reset()  #<-- Resets the internal states of DagBuilder
-        ```
-    """
     def __init__(self):
         self._dag = Dag()
 
     def add_node(self,
                  label: str,
-                 cb_func: Callable[["Node", dict[str, Result]], Result],
-                 result_kind: type[Result],
+                 cb_func: Callable[["Node", dict[str, Result]], Any],
                  depends_on: list[str | Node],
-                 use_dependency_results: bool = True,
-                 node_kind: type[Node] = Node,
+                 use_deps: bool = True,
+                 raise_error: bool = False,
                  *cb_args,
                  **cb_kwargs
                  ) -> "DagBuilder":
-        """
-        Creates a `Node` from given parameters and dependencies.
-
-        Which then forms an arc (from dependencies to the constructed node) to be added in the `Dag`.
-        """
         node = self._dag[label] if label in self._dag.node_labels \
-            else node_kind(
+            else Node(
                 label,
                 cb_func,
-                result_kind,
+                use_deps=use_deps,
+                raise_error=raise_error,
                 *cb_args,
-                use_dependency_results=use_dependency_results,
-                **cb_kwargs,
+                **cb_kwargs
             )
 
         # Register the dependency arc to the DAG
