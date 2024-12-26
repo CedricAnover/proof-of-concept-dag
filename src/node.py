@@ -9,6 +9,17 @@ class NodeError(Exception):
 
 
 class Node:
+    # Note: By default, the nodes will run even if one of their dependencies has failed. 
+    # The successful or failed result can be obtained in the `Result.is_success` field. 
+    # If you want to stop the flow of the DAG, set `Node(..., raise_error=True, ...)` in a Node so that it raises the error.
+
+    # Note: By default, `use_deps=True` in the Node constructor parameter means that when a node is ready to run, 
+    # it will read all the results of its dependencies for further processing. 
+    # This can be considered an overhead due to file I/O. This is called "result passing." 
+    # If we set `use_deps=False` in `Node(..., use_deps=False, ...)`, the node will run after all its 
+    # dependencies are complete but will not read all the results of its dependencies from disk. 
+    # This can speed up the process if a node does not necessarily need the results of its dependencies.
+
     def __init__(self,
                  label: str,
                  callback: Callable[["Node", Dict[str, Result]], Any],

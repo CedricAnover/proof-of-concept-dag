@@ -46,7 +46,11 @@ class ResultIO(ABC):
 class MemoryResultIO(ResultIO):
     def __init__(self):
         super().__init__("")
-        self._result_storage = dict()  # In memory
+        self._result_storage = dict()  # In memory; Node Label => Result
+
+    @property
+    def results(self) -> list[Result]:
+        return [result for _, result in self._result_storage.items()]
 
     def write_result(self, result: Result, node_label: str) -> None:
         self._result_storage[node_label] = result

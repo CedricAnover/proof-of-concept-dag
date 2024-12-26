@@ -44,11 +44,15 @@ if __name__ == "__main__":
         print(f"{src} --> {dst}")
     print()
 
-    # conduit = ThreadPoolConduit(dag)
-    # conduit = ThreadConduit(dag)
-    # conduit.start()
+    # Remind: `ThreadPoolConduit` and `ThreadConduit` uses `MemoryResultIO`, which means 
+    # that the list of results can be obtained using `MemoryResultIO.results` property.
 
-    # res_io = MemoryResultIO()
-    res_io = LocalResultIO()
-    async_conduit = AsyncConduit(dag, res_io)
-    async_conduit.start()
+    # conduit = ThreadPoolConduit(dag)
+    conduit = ThreadConduit(dag)
+    conduit.start()
+    for res in conduit.result_io.results:
+        print(res)
+
+    # res_io = LocalResultIO()
+    # async_conduit = AsyncConduit(dag, res_io)
+    # async_conduit.start()
