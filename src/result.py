@@ -1,136 +1,45 @@
-import json
 import os
 import shutil
 import tempfile
 import uuid
 from pathlib import Path
-from typing import AnyStr, Any, Optional, Type, get_type_hints, get_args, get_origin
-from dataclasses import dataclass, fields, is_dataclass
-from abc import ABC, ABCMeta, abstractmethod
+from typing import Any, Optional
+from abc import ABC, abstractmethod
+from pydantic import BaseModel
 
 
-@dataclass
-class Result(ABC):
+class Result(BaseModel):
+    node_label: str
+    is_success: bool
+    result_data: Optional[Any] = None
+    error: Optional[str] = None
+
     @classmethod
-    @abstractmethod
-    def deserialize(cls, obj_str: AnyStr, *args, **kwargs) -> "Result":
-        pass
+    def create_success_result(cls, node_label: str, result_data: Any, *args, **kwargs) -> "Result":
+        return cls(node_label=node_label, is_success=True, result_data=result_data, *args, **kwargs)
 
-    @abstractmethod
-    def serialize(self, *args, **kwargs) -> AnyStr:
-        pass
-
-
-class DictMeta(ABCMeta):
-    def __new__(mcls, name: str, bases: tuple, attrs: dict):
-        # Add `to_dict` and `from_dict` methods
-        attrs["to_dict"] = mcls.to_dict
-        attrs["from_dict"] = classmethod(mcls.from_dict)
-
-        return super().__new__(mcls, name, bases, attrs)
-
-    @staticmethod
-    def _is_dataclass_instance(obj):
-        """Check if an object is a dataclass instance."""
-        return is_dataclass(obj) and not isinstance(obj, type)
-
-    @staticmethod
-    def _from_dict_recursive(cls: Type[Any], data: Any) -> Any:
-        """
-        Recursively convert dictionary data to dataclass instances.
-        """
-        if isinstance(data, dict):
-            if is_dataclass(cls):
-                # Handle nested dataclass for dictionary fields
-                init_kwargs = {}
-                type_hints = get_type_hints(cls)
-                for field_name, field_value in data.items():
-                    field_type = type_hints.get(field_name, Any)
-                    if DictMeta._is_dataclass_instance(field_type):
-                        init_kwargs[field_name] = field_type.from_dict(field_value)
-                    elif get_origin(field_type) == dict:
-                        key_type, value_type = get_args(field_type)
-                        init_kwargs[field_name] = {
-                            key_type(k): DictMeta._from_dict_recursive(value_type, v)
-                            for k, v in field_value.items()
-                        }
-                    elif get_origin(field_type) == list:
-                        inner_type = get_args(field_type)[0]
-                        init_kwargs[field_name] = [
-                            DictMeta._from_dict_recursive(inner_type, v)
-                            for v in field_value
-                        ]
-                    else:
-                        init_kwargs[field_name] = field_value
-                return cls(**init_kwargs)
-            return data
-        elif isinstance(data, list):
-            # Handle lists of dataclasses
-            return [DictMeta._from_dict_recursive(cls, item) for item in data]
-        return data
-
-    @staticmethod
-    def _to_dict_recursive(obj: Any) -> Any:
-        """
-        Recursively convert dataclass instances to dictionaries.
-        """
-        if DictMeta._is_dataclass_instance(obj):
-            return {
-                field.name: DictMeta._to_dict_recursive(getattr(obj, field.name))
-                for field in fields(obj)
-            }
-        elif isinstance(obj, list):
-            return [DictMeta._to_dict_recursive(item) for item in obj]
-        elif isinstance(obj, dict):
-            return {str(k): DictMeta._to_dict_recursive(v) for k, v in obj.items()}
-        return obj
-
-    @staticmethod
-    def from_dict(cls: Type["Result"], data: dict) -> "Result":
-        """
-        Recursively convert a dictionary to a dataclass instance.
-        """
-        return DictMeta._from_dict_recursive(cls, data)
-
-    @staticmethod
-    def to_dict(self) -> dict:
-        """
-        Recursively convert a dataclass instance to a dictionary.
-        """
-        return DictMeta._to_dict_recursive(self)
-
-
-@dataclass
-class JsonResult(Result, metaclass=DictMeta):
     @classmethod
-    def deserialize(cls: Type["JsonResult"], obj_str: str, *args, **kwargs) -> "JsonResult":
-        """
-        Deserialize JSON string to an instance of the class, handling nested dataclasses.
-        """
-        dct = json.loads(obj_str, *args, **kwargs)
-        return cls.from_dict(dct)
+    def create_fail_result(cls, node_label: str, error_message: str, *args, **kwargs) -> "Result":
+        return cls(node_label=node_label, is_success=False, error=error_message, *args, **kwargs)
+
+    @classmethod
+    def deserialize(cls, json_str: str, *args, **kwargs) -> "Result":
+        return cls.model_validate_json(json_str, *args, **kwargs)
 
     def serialize(self, *args, **kwargs) -> str:
-        """
-        Serialize the dataclass to JSON, handling nested dataclasses.
-        """
-        return json.dumps(self.to_dict(), *args, **kwargs)
+        return self.model_dump_json(*args, **kwargs)
 
 
 class ResultIO(ABC):
-    def __init__(self, temp_location: Optional[str] = None, name_prefix: str = "dag"):
-        temp_dir_name = f"{name_prefix}-{uuid.uuid4()}"
-        root_temp_dir = Path(tempfile.gettempdir()).resolve()
-
-        # Defaults locally if temp_location is not provided (locally or remotely)
-        self.temp_location = temp_location or str(root_temp_dir / temp_dir_name)
+    def __init__(self, location: str):
+        self.location = location
 
     @abstractmethod
     def write_result(self, result: Result, node_label: str, *args, **kwargs) -> None:
         pass
 
     @abstractmethod
-    def read_result(self, node_label: str, result_kind: type[Result], *args, **kwargs) -> Result:
+    def read_result(self, node_label: str, *args, **kwargs) -> Result:
         pass
 
 
@@ -142,39 +51,42 @@ class MemoryResultIO(ResultIO):
     def write_result(self, result: Result, node_label: str) -> None:
         self._result_storage[node_label] = result
 
-    def read_result(self, node_label: str, result_kind: type[Result]) -> Result:
+    def read_result(self, node_label: str) -> Result:
         return self._result_storage[node_label]
 
 
-class LocalFsCrudMeta(ABCMeta):
-    def __new__(mcls, name: str, bases: tuple, attrs: dict):
-        assert ResultIO in bases, "ResultIO is not inherited."
+class LocalResultIO(ResultIO):
+    file_extension: str = "json"
 
-        attrs["read_results"] = mcls.read_results
-        attrs["create_temp_location"] = mcls.create_temp_location
-        attrs["delete_temp_location"] = mcls.delete_temp_location
-        attrs["file_path"] = mcls.file_path
-        attrs["transfer_results"] = mcls.transfer_results
+    def __init__(self, location: Optional[str] = None, name_prefix: str = "dag"):
+        dir_name = f"{name_prefix}-{uuid.uuid4()}"
+        root_dir = Path(tempfile.gettempdir()).resolve()
 
-        new_cls = super().__new__(mcls, name, bases, attrs)
-        return new_cls
+        # Defaults to local temporary directory
+        location_ = location or str(root_dir / dir_name)
+        super().__init__(location_)
 
-    @staticmethod
-    def read_results(self, node_labels: list[str], *args, **kwargs) -> list[Result]:
-        return [self.read_result(node_label, *args, **kwargs) for node_label in node_labels]
+    def write_result(self, result: Result, node_label: str) -> None:
+        file_path = self.file_location(node_label)
+        if not file_path.parent.exists():
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(result.serialize())
 
-    @staticmethod
-    def create_temp_location(self, *args, **kwargs) -> None:
-        os.makedirs(self.temp_location, *args, **kwargs)
+    def read_result(self, node_label: str) -> Result:
+        file_path = self.file_location(node_label)
+        obj_str = file_path.read_text()
+        result = Result.deserialize(obj_str)
+        return result
 
-    @staticmethod
-    def delete_temp_location(self, *args, ignore_errors=True, **kwargs) -> None:
-        shutil.rmtree(self.temp_location, *args, ignore_errors=ignore_errors, **kwargs)
+    def create_location_directory(self, *args, **kwargs) -> None:
+        os.makedirs(self.location, *args, **kwargs)
 
-    @staticmethod
-    def transfer_results(self, destination_dir: str) -> None:
-        dest_dir_path = Path(destination_dir).resolve()
-        src_dir_path = Path(self.temp_location).resolve()
+    def delete_location_directory(self, ignore_errors=True, *args, **kwargs) -> None:
+        shutil.rmtree(self.location, *args, ignore_errors=ignore_errors, **kwargs)
+
+    def transfer_results(self, destination_location: str) -> None:
+        dest_dir_path = Path(destination_location).resolve()
+        src_dir_path = Path(self.location).resolve()
 
         if not dest_dir_path.exists():
             os.makedirs(str(dest_dir_path))
@@ -184,26 +96,9 @@ class LocalFsCrudMeta(ABCMeta):
 
         shutil.move(src_dir_path, dest_dir_path)
 
-    @staticmethod
-    def file_path(self, node_label: str, file_extension: str | None = None) -> Path:
-        temp_dir_path = Path(self.temp_location).resolve()
-        if file_extension:
-            return temp_dir_path / f"{node_label}.{file_extension}"
+    def file_location(self, node_label) -> Path:
+        location_dir_path = Path(self.location).resolve()
+        if self.file_extension:
+            return location_dir_path / f"{node_label}.{self.file_extension}"
         else:
-            return temp_dir_path / f"{node_label}"
-
-
-class LocalResultIO(ResultIO, metaclass=LocalFsCrudMeta):
-    file_extension: str = "json"
-
-    def write_result(self, result: Result, node_label: str) -> None:
-        file_path = self.file_path(node_label, file_extension=self.file_extension)
-        if not file_path.parent.exists():
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(result.serialize())
-
-    def read_result(self, node_label: str, result_kind: type[Result]) -> Result:
-        file_path = self.file_path(node_label, file_extension=self.file_extension)
-        obj_str = file_path.read_text()
-        result = result_kind.deserialize(obj_str)
-        return result
+            return location_dir_path / f"{node_label}"
