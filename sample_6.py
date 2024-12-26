@@ -41,4 +41,4 @@ if __name__ == "__main__":
 
     res_io = LocalResultIO()
     conduit = AsyncConduit(dag, res_io)
-    conduit.start()
+    conduit.main_start()

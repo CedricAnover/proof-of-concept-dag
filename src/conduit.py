@@ -66,7 +66,7 @@ class ParallelConduits:
             raise ValueError("Adding a new conduit would exceed the maximum number of worker processors.")
 
         processor = Process(
-            target=conduit.start,
+            target=conduit.main_start if hasattr(conduit, "main_start") else conduit.start,
             name=f"{self.name}-{self.num_processors + 1}",
             args=start_args,
             kwargs=start_kw
@@ -82,102 +82,34 @@ class ParallelConduits:
             proc.join()
 
 
-class ConduitFactoryMixin(ABCMeta):
+class ConduitMixin(ABCMeta):
     def __new__(mcls, name, bases, attrs, /, *mcls_args, **mcls_kwargs):
-        # Attach the New Factory Methods
-        attrs["create_with_clean_start"] = classmethod(mcls.create_with_clean_start)
-        attrs["create_with_result_backup"] = classmethod(mcls.create_with_result_backup)
+        attrs["main_start"] = mcls.main_start
 
         new_cls = super().__new__(mcls, name, bases, attrs, *mcls_args, **mcls_kwargs)
         return new_cls
 
     @staticmethod
-    def create_with_clean_start(cls,
-                                *conduit_args,
-                                delete_temp_location: bool = True,
-                                delete_args=(),
-                                delete_kwargs=None,
-                                create_args=(),
-                                create_kwargs=None,
-                                **conduit_kwargs
-                                ) -> type[Conduit]:
-        """
-        Conduit Factory Method that overrides the original Conduit.start method to delete
-        and re-create a temporary directory before starting the conduit.
-        """
-        instance = cls(*conduit_args, **conduit_kwargs)
+    def main_start(self,
+                   *args,
+                   backup_location: str | None = None,
+                   backup_args: tuple = (),
+                   backup_kwargs: dict | None = None,
+                   **kwargs
+                   ) -> None:
+        """Informal wrapper for Conduit.start to control the flow and cleanup process."""
+        backup_kwargs = backup_kwargs or dict()
 
-        delete_kwargs = delete_kwargs or dict()
-        create_kwargs = create_kwargs or dict()
-
-        # Store the original start before modifications
-        original_start = instance.start
-
-        # Define the new start method
-        def start(self, *args, **kwargs):
-            assert hasattr(self, "result_io"), "The instance does not have 'result_io' field."
-
-            # Create the temporary location for storing results
-            if hasattr(self.result_io, "delete_temp_location"):
-                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
-            if hasattr(self.result_io, "create_temp_location"):
-                # Create Temporary Location
-                self.result_io.create_temp_location(*create_args, **create_kwargs)
-
-            # Invoke the original start method but dont pass `self`
-            original_start(*args, **kwargs)
-
-            # Delete Temporary Location, if specified
-            if delete_temp_location and hasattr(self.result_io, "delete_temp_location"):
-                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
-
-        # Modify the start method to create a temporary directory before running.
-        instance.start = start.__get__(instance)
-        return instance
-
-    @staticmethod
-    def create_with_result_backup(cls: type[Conduit],
-                                  backup_location: str,
-                                  *conduit_args,
-                                  delete_args=(),
-                                  delete_kwargs=None,
-                                  create_args=(),
-                                  create_kwargs=None,
-                                  **conduit_kwargs
-                                  ) -> type[Conduit]:
-        instance = cls(*conduit_args, **conduit_kwargs)
-
-        delete_kwargs = delete_kwargs or dict()
-        create_kwargs = create_kwargs or dict()
-
-        # Store the original start before modifications
-        original_start = instance.start
-
-        # Define the new start method
-        def start(self, *args, **kwargs):
-            # Delete and Create the Temporary Location
-            assert hasattr(self, "result_io"), "The instance does not have 'result_io' field."
-            if hasattr(self.result_io, "delete_temp_location"):
-                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
-            if hasattr(self.result_io, "create_temp_location"):
-                self.result_io.create_temp_location(*create_args, **create_kwargs)
-
-            # Invoke the original start method but dont pass `self`
-            original_start(*args, **kwargs)
-
-            # Backup/Transfer the Results to a new location
-            if hasattr(self.result_io, "delete_temp_location"):
-                if backup_location and hasattr(self.result_io, "transfer_results"):
-                    # Backup Results to new location
-                    self.result_io.transfer_results(backup_location)
-                self.result_io.delete_temp_location(*delete_args, **delete_kwargs)
-
-        # Modify the start() method to create a temporary directory before running.
-        instance.start = start.__get__(instance)
-        return instance
+        try:
+            self.start(*args, **kwargs)
+            if isinstance(backup_location, str) and hasattr(self.result_io, "transfer_results"):
+                # Backup Results to new location
+                self.result_io.transfer_results(backup_location, *backup_args, **backup_kwargs)
+        finally:
+            self.clean()
 
 
-class AsyncConduit(Conduit):
+class AsyncConduit(Conduit, metaclass=ConduitMixin):
     def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10):
         super().__init__(dag, result_io)
         self.concurrency_limit = concurrency_limit
@@ -229,14 +161,10 @@ class AsyncConduit(Conduit):
 
     def start(self) -> None:
         """Start the DAG execution."""
-        try:
-            asyncio.run(self._main_loop())
-        finally:
-            # TODO: Add result backup or transfer
-            self.clean()
+        asyncio.run(self._main_loop())
 
 
-class ThreadPoolConduit(Conduit):
+class ThreadPoolConduit(Conduit, metaclass=ConduitMixin):
     def __init__(self, dag: Dag, result_io: ResultIO, *pool_args, **pool_kwargs):
         super().__init__(dag, result_io)
         self._pool_args = pool_args
@@ -280,8 +208,4 @@ class ThreadPoolConduit(Conduit):
 
     def start(self) -> None:
         """Start the DAG execution."""
-        try:
-            self._main_loop()
-        finally:
-            # TODO: Add result backup or transfer
-            self.clean()
+        self._main_loop()

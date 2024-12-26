@@ -72,4 +72,4 @@ print()
 
 res_io = LocalResultIO()
 async_conduit = AsyncConduit(dag, res_io)
-async_conduit.start()
+async_conduit.main_start()

@@ -54,4 +54,4 @@ if __name__ == "__main__":
     # [node-5] Ready for execution.
     # [node-4] Ready for execution.
     async_conduit = AsyncConduit(dag, res_io)
-    async_conduit.start()
+    async_conduit.main_start()
