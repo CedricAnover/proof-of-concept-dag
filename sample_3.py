@@ -2,7 +2,7 @@
 
 import random
 
-from src.conduit import AsyncConduit, ParallelConduits, ThreadConduit, ThreadPoolConduit
+from src.conduit import AsyncConduit, ParallelConduits
 from src.result import Result, LocalResultIO, MemoryResultIO
 from src.dag import Dag
 from src.node import Node
@@ -44,20 +44,6 @@ def create_dag() -> Dag:
     return dag
 
 
-def random_conduit(dag: Dag) -> AsyncConduit | ThreadConduit | ThreadPoolConduit:
-    def random_result_io() -> LocalResultIO | MemoryResultIO:
-        rand_result_io = random.choice([LocalResultIO, MemoryResultIO])
-        return rand_result_io()
-
-    rand_conduit_cls = random.choice([AsyncConduit, ThreadConduit, ThreadPoolConduit])
-
-    if rand_conduit_cls is AsyncConduit:
-        rand_res_io = random_result_io()
-        return rand_conduit_cls(dag, rand_res_io)
-
-    return rand_conduit_cls(dag)
-
-
 def main():
     max_processors = 4
 
@@ -65,16 +51,11 @@ def main():
     for _ in range(max_processors):
         dag = create_dag()
 
-        # conduit = ThreadConduit(dag)
-        conduit = ThreadPoolConduit(dag)
-        parallel_conduits.add_conduit(conduit)
+        # res_io = MemoryResultIO()
+        res_io = LocalResultIO()
 
-        # res_io = LocalResultIO()
-        # async_conduit = AsyncConduit(dag, res_io)
-        # parallel_conduits.add_conduit(async_conduit)
-
-        # rand_conduit = random_conduit(dag)
-        # parallel_conduits.add_conduit(rand_conduit)
+        async_conduit = AsyncConduit(dag, res_io)
+        parallel_conduits.add_conduit(async_conduit)
 
     parallel_conduits.start()
 

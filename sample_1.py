@@ -1,6 +1,6 @@
 from typing import Any
 
-from src.conduit import AsyncConduit, ThreadPoolConduit, ThreadConduit
+from src.conduit import AsyncConduit
 from src.result import Result, LocalResultIO, MemoryResultIO
 from src.dag import Dag
 from src.node import Node
@@ -27,7 +27,7 @@ if __name__ == "__main__":
     node_4 = Node("4", my_callback)
     node_5 = Node("5", my_callback)
     node_6 = Node("6", my_callback, message="Some Message")
-    node_7 = Node("7", fail_callback)
+    node_7 = Node("7", fail_callback, raise_error=False)
     node_8 = Node("8", my_callback)
 
     dag = Dag()
@@ -44,15 +44,7 @@ if __name__ == "__main__":
         print(f"{src} --> {dst}")
     print()
 
-    # Remind: `ThreadPoolConduit` and `ThreadConduit` uses `MemoryResultIO`, which means 
-    # that the list of results can be obtained using `MemoryResultIO.results` property.
-
-    # conduit = ThreadPoolConduit(dag)
-    conduit = ThreadConduit(dag)
-    conduit.start()
-    for res in conduit.result_io.results:
-        print(res)
-
-    # res_io = LocalResultIO()
-    # async_conduit = AsyncConduit(dag, res_io)
-    # async_conduit.start()
+    # res_io = MemoryResultIO()
+    res_io = LocalResultIO()
+    async_conduit = AsyncConduit(dag, res_io)
+    async_conduit.start()

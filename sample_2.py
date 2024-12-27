@@ -1,10 +1,8 @@
 """Example: Using `node_registrator` decorator."""
 
-import time
-import random
 from typing import Any
 
-from src.conduit import AsyncConduit, ThreadConduit, ThreadPoolConduit
+from src.conduit import AsyncConduit
 from src.result import Result, LocalResultIO, MemoryResultIO
 from src.dag import Dag, node_registrator
 from src.node import Node
@@ -16,9 +14,6 @@ def my_callback(node: Node, dep_results: dict[str, Result], message=None) -> Any
         print(f"[node-{node.label}] Dependency Results - {dep_results} | Message: {message}")
     else:
         print(f"[node-{node.label}] Dependency Results - {dep_results}")
-
-    # Simulate long-running process
-    time.sleep(random.randint(1, 2))
 
     result_data = (f"{node.label}-stdout", f"{node.label}-stderr")
     return result_data
@@ -75,10 +70,7 @@ if __name__ == "__main__":
         print(f"{src} --> {dst}")
     print()
 
-    # conduit = ThreadPoolConduit(dag)
-    conduit = ThreadConduit(dag)
-    conduit.start()
-
-    # res_io = LocalResultIO()
-    # async_conduit = AsyncConduit(dag, res_io)
-    # async_conduit.start()
+    # res_io = MemoryResultIO()
+    res_io = LocalResultIO()
+    async_conduit = AsyncConduit(dag, res_io)
+    async_conduit.start()

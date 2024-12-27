@@ -2,7 +2,7 @@
 
 from pprint import pprint
 
-from src.conduit import AsyncConduit, ThreadConduit, ThreadPoolConduit
+from src.conduit import AsyncConduit
 from src.result import Result, LocalResultIO, MemoryResultIO
 from src.dag import DagBuilder
 from src.node import Node
@@ -38,11 +38,7 @@ if __name__ == "__main__":
         print(f"{src} --> {dst}")
     print()
 
-    conduit = ThreadPoolConduit(dag)
-    # conduit = ThreadConduit(dag)
-    conduit.start()
-
-    # res_io = LocalResultIO()
     # res_io = MemoryResultIO()
-    # conduit = AsyncConduit(dag, res_io)
-    # conduit.start()
+    res_io = LocalResultIO()
+    conduit = AsyncConduit(dag, res_io)
+    conduit.start()
