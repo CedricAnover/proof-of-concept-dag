@@ -1,5 +1,5 @@
 """Example: Using `node_registrator` decorator."""
-
+import time
 from typing import Any
 
 from src.conduit import AsyncConduit
@@ -31,7 +31,7 @@ if __name__ == "__main__":
 
 
     def _cb_func(node: Node, dep_results: dict[str, Result]) -> Any:
-        print(f"[node-{node.label}] {dep_results}")
+        print(f"[node-{node.label}] Dependency Results: {dep_results}")
         return f"{node.label}-stdout"
 
 
@@ -43,6 +43,7 @@ if __name__ == "__main__":
 
     @node_registrator(dag, "4", depends_on=["3", node_a, node_b])
     def cb_4(node, dep_results):
+        time.sleep(5)
         return _cb_func(node, dep_results)
 
 
@@ -56,13 +57,13 @@ if __name__ == "__main__":
         return _cb_func(node, dep_results)
 
 
-    @node_registrator(dag, "7", depends_on=["4", "6"])
+    @node_registrator(dag, "7", depends_on=["4", "6"], raise_error=False)
     def cb_7(node, dep_results):
-        return _cb_func(node, dep_results)
+        raise Exception("Simulated Error")
 
 
     @node_registrator(dag, "8", depends_on=["7"])
-    def cb_7(node, dep_results):
+    def cb_8(node, dep_results):
         return _cb_func(node, dep_results)
 
 
@@ -70,7 +71,8 @@ if __name__ == "__main__":
         print(f"{src} --> {dst}")
     print()
 
+
     # res_io = MemoryResultIO()
     res_io = LocalResultIO()
-    async_conduit = AsyncConduit(dag, res_io)
+    async_conduit = AsyncConduit(dag, res_io, node_timeout=100)
     async_conduit.start()
