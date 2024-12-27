@@ -1,20 +1,11 @@
 import asyncio
-import mmap
-import struct
-import multiprocessing
-import signal
-import math
-import time
 import functools
-import os
-import threading
 from multiprocessing import Process, cpu_count
-from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor, as_completed, Future
-from abc import ABCMeta, ABC, abstractmethod
+from abc import ABC, abstractmethod
 from typing import Sequence
 
 from .enums import NodeStateEnum
-from .result import ResultIO, MemoryResultIO
+from .result import ResultIO
 from .node import Node
 from .dag import Dag
 
@@ -79,55 +70,55 @@ class ParallelConduits:
 
 
 class AsyncConduit(Conduit):
-    def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10):
+    def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10, node_timeout: float = 30):
         super().__init__(dag, result_io)
         self.concurrency_limit = concurrency_limit
-        self._running_nodes = set()  # Tracks currently running nodes to prevent duplicates
+        self.node_timeout = node_timeout  # Timeout for node execution (in seconds)
+        self._node_tasks = {}  # Track tasks for all nodes
 
-    async def _run_node_async(self, node: Node, dependencies: list[Node]) -> None:
-        """Run a node's computation asynchronously."""
-        if node in self._running_nodes:
-            # Avoid duplicate execution
-            return
+    async def _async_node_start(self, node: Node, dependencies: list[Node], result_io: ResultIO) -> None:
+        """Run a node's computation asynchronously in a thread pool with timeout."""
+        loop = asyncio.get_running_loop()
 
-        self._running_nodes.add(node)
         try:
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, node.start, dependencies, self.result_io)
-        finally:
-            self._running_nodes.remove(node)
+            # Run the node in the thread pool with a timeout
+            await asyncio.wait_for(
+                loop.run_in_executor(
+                    None,  # Use the default ThreadPoolExecutor
+                    functools.partial(node.start, dependencies, result_io)
+                ),
+                timeout=self.node_timeout  # Apply timeout to each node's execution
+            )
 
-    async def _execute_ready_nodes(self, semaphore: asyncio.Semaphore) -> None:
-        """Find READY nodes and execute them asynchronously within concurrency limits."""
-        tasks = []
-        for node in self.get_nodes(NodeStateEnum.IDLE):
-            if self.is_node_ready(node):
-                print(f"[node-{node.label}] Ready for execution.")
-                dependencies = self.dag.direct_dependencies(node)
-                tasks.append(self._schedule_node_with_semaphore(node, dependencies, semaphore))
-        await asyncio.gather(*tasks)
+        except asyncio.TimeoutError:
+            err_msg = f"Execution timed out for node {node.label} after {self.node_timeout} seconds."
+            raise ConduitError(err_msg)
 
-    async def _schedule_node_with_semaphore(self, node: Node, dependencies: list[Node], semaphore: asyncio.Semaphore):
-        """Wrap node execution with a semaphore for concurrency control."""
-        async with semaphore:
-            await self._run_node_async(node, dependencies)
-
-    async def _main_loop(self, delay=0.1) -> None:
-        """Main loop to manage DAG execution."""
-        semaphore = asyncio.Semaphore(self.concurrency_limit)  # Limit concurrent tasks
-
-        # Start source nodes (those with no dependencies)
-        source_tasks = [
-            asyncio.create_task(self._schedule_node_with_semaphore(node, [], semaphore))
-            for node in self.dag.sources
+    async def _run_node(self, node: Node, semaphore: asyncio.Semaphore):
+        """Execute a node, ensuring its dependencies are complete."""
+        # Wait for all dependency tasks to complete
+        dependency_tasks = [
+            self._node_tasks[dep] for dep in self.dag.direct_dependencies(node)
         ]
-        await asyncio.gather(*source_tasks)
 
-        # Process the DAG until all nodes are complete
-        while not self.are_all_nodes_complete():
-            await self._execute_ready_nodes(semaphore)
-            await asyncio.sleep(delay)
+        # Wait for all dependencies to finish
+        if dependency_tasks:
+            await asyncio.gather(*dependency_tasks)
+
+        # Run the node itself with semaphore to control concurrency
+        async with semaphore:
+            await self._async_node_start(node, self.dag.direct_dependencies(node), self.result_io)
+
+    async def _main_loop(self) -> None:
+        """Main Loop."""
+        semaphore = asyncio.Semaphore(self.concurrency_limit)  # Control concurrent tasks
+
+        # Create tasks for all nodes upfront
+        for node in self.dag.nodes:
+            self._node_tasks[node] = asyncio.create_task(self._run_node(node, semaphore))
+
+        await asyncio.gather(*self._node_tasks.values())  # Wait for all tasks to complete
 
     def start(self) -> None:
-        """Start the DAG execution."""
+        """Start the DAG."""
         asyncio.run(self._main_loop())
