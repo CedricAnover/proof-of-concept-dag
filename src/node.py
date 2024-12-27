@@ -2,6 +2,10 @@ from typing import Callable, Dict
 
 from .enums import NodeStateEnum
 from .result import *
+from ._logger import create_logger
+
+
+logger = create_logger(__name__)
 
 
 class NodeError(Exception):
@@ -67,6 +71,7 @@ class Node:
             self.set_state(NodeStateEnum.COMPLETE_SUCCESS)
         except Exception as err:
             # Raise the error if specified in constructor
+            logger.error(err)
             if self._raise_error:
                 raise NodeError(str(err))
 

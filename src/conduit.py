@@ -8,6 +8,10 @@ from .enums import NodeStateEnum
 from .result import ResultIO
 from .node import Node
 from .dag import Dag
+from ._logger import create_logger
+
+
+logger = create_logger(__name__)
 
 
 class ConduitError(Exception):
@@ -92,6 +96,7 @@ class AsyncConduit(Conduit):
 
         except asyncio.TimeoutError:
             err_msg = f"Execution timed out for node {node.label} after {self.node_timeout} seconds."
+            logger.error(err_msg)
             raise ConduitError(err_msg)
 
     async def _run_node(self, node: Node, semaphore: asyncio.Semaphore):
