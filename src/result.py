@@ -3,106 +3,63 @@ import shutil
 import tempfile
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, AnyStr, Type, Optional, Sequence, Protocol
 from abc import ABC, abstractmethod
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class Result(BaseModel):
-    node_label: str
-    is_success: bool
-    result_data: Optional[Any] = None
-    error: Optional[str] = None
+    node_label: str = Field(..., description="Node label associated with the result.")
+    is_success: bool = Field(..., description="Completion state of a node (Sucess or Fail).")
+    result_data: Optional[Any] = Field(None, description="Output result of the node. Note that this should be serializable/deserializable.")
+    error: Optional[str] = Field(None, description="Error message if an error occurred after running a node.")
+    id_: uuid.UUID = Field(default_factory=uuid.uuid4, description="A unique identifier for the result.")
+
+
+class ISerializeDeserialize(ABC):
+    @abstractmethod
+    def serialize(self, result: Result, *args, **kwargs) -> AnyStr:
+        pass
 
     @classmethod
-    def create_success_result(cls, node_label: str, result_data: Any, *args, **kwargs) -> "Result":
-        return cls(node_label=node_label, is_success=True, result_data=result_data, *args, **kwargs)
-
-    @classmethod
-    def create_fail_result(cls, node_label: str, error_message: str, *args, **kwargs) -> "Result":
-        return cls(node_label=node_label, is_success=False, error=error_message, *args, **kwargs)
-
-    @classmethod
-    def deserialize(cls, json_str: str, *args, **kwargs) -> "Result":
-        return cls.model_validate_json(json_str, *args, **kwargs)
-
-    def serialize(self, *args, **kwargs) -> str:
-        return self.model_dump_json(*args, **kwargs)
+    @abstractmethod
+    def deserialize(cls, result_str: AnyStr, *args, **kwargs) -> Result:
+        pass
 
 
 class ResultIO(ABC):
-    def __init__(self, location: str):
-        self.location = location
+    # The optionality of Pickle, JSON, CSV, etc. has to be decided & implemented here.
+    def __init__(self, location: str, ):
+        self.location = location  # Memory, Local File/DB, or Remote File/DB
 
     @abstractmethod
-    def write_result(self, result: Result, node_label: str, *args, **kwargs) -> None:
+    def write_result(self, result: Result, node_label: AnyStr, *args, **kwargs) -> None:
         pass
 
     @abstractmethod
-    def read_result(self, node_label: str, *args, **kwargs) -> Result:
+    def read_result(self, node_label: AnyStr, *args, **kwargs) -> Result:
         pass
 
 
-class MemoryResultIO(ResultIO):
-    def __init__(self):
-        super().__init__("")
-        self._result_storage = dict()  # In memory; Node Label => Result
+class IResultOperations(ABC):
+    def __init__(self, result_io: ResultIO):
+        self.result_io = result_io
 
-    @property
-    def results(self) -> list[Result]:
-        return [result for _, result in self._result_storage.items()]
+    @abstractmethod
+    def create_location(self, *args, **kwargs) -> None:
+        pass
 
-    def write_result(self, result: Result, node_label: str) -> None:
-        self._result_storage[node_label] = result
+    @abstractmethod
+    def delete_location(self, *args, **kwargs) -> None:
+        pass
 
-    def read_result(self, node_label: str) -> Result:
-        return self._result_storage[node_label]
+    @abstractmethod
+    def transfer_results(self, dest_location: AnyStr, *args, **kwargs) -> None:
+        pass
 
+    @abstractmethod
+    def result_location(self, node_label: AnyStr, *args, **kwargs) -> AnyStr | Path:
+        pass
 
-class LocalResultIO(ResultIO):
-    file_extension: str = "json"
+#=============================================================================================
 
-    def __init__(self, location: Optional[str] = None, name_prefix: str = "dag"):
-        dir_name = f"{name_prefix}-{uuid.uuid4()}"
-        root_dir = Path(tempfile.gettempdir()).resolve()
-
-        # Defaults to local temporary directory
-        location_ = location or str(root_dir / dir_name)
-        super().__init__(location_)
-
-    def write_result(self, result: Result, node_label: str) -> None:
-        file_path = self.file_location(node_label)
-        if not file_path.parent.exists():
-            file_path.parent.mkdir(parents=True, exist_ok=True)
-        file_path.write_text(result.serialize())
-
-    def read_result(self, node_label: str) -> Result:
-        file_path = self.file_location(node_label)
-        obj_str = file_path.read_text()
-        result = Result.deserialize(obj_str)
-        return result
-
-    def create_location_directory(self, *args, **kwargs) -> None:
-        os.makedirs(self.location, *args, **kwargs)
-
-    def delete_location_directory(self, ignore_errors=True, *args, **kwargs) -> None:
-        shutil.rmtree(self.location, *args, ignore_errors=ignore_errors, **kwargs)
-
-    def transfer_results(self, destination_location: str) -> None:
-        dest_dir_path = Path(destination_location).resolve()
-        src_dir_path = Path(self.location).resolve()
-
-        if not dest_dir_path.exists():
-            os.makedirs(str(dest_dir_path))
-
-        if not dest_dir_path.is_dir():
-            raise ValueError("The given destination directory is not a directory.")
-
-        shutil.move(src_dir_path, dest_dir_path)
-
-    def file_location(self, node_label) -> Path:
-        location_dir_path = Path(self.location).resolve()
-        if self.file_extension:
-            return location_dir_path / f"{node_label}.{self.file_extension}"
-        else:
-            return location_dir_path / f"{node_label}"
