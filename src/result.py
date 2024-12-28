@@ -9,6 +9,14 @@ from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 
 
+class ResultError(Exception):
+    """Base class of all result related errors."""
+
+
+class ResultIOError(ResultError):
+    pass
+
+
 class ResultData(BaseModel, Protocol):
     """Base class for all result data."""
 
@@ -33,7 +41,7 @@ class ISerializeDeserialize(ABC):
 
 class ResultIO(ABC):
     # The optionality of Pickle, JSON, CSV, etc. has to be decided & implemented here.
-    def __init__(self, location: str, ):
+    def __init__(self, location: str):
         self.location = location  # Memory, Local File/DB, or Remote File/DB
 
     @abstractmethod
@@ -58,7 +66,7 @@ class IResultOperations(ABC):
         pass
 
     @abstractmethod
-    def transfer_results(self, dest_location: AnyStr, *args, **kwargs) -> None:
+    def transfer_results(self, dest_location: AnyStr | Path, *args, **kwargs) -> None:
         pass
 
     @abstractmethod
@@ -88,6 +96,31 @@ class PickleSerializer(ISerializeDeserialize):
 #=============================================================================================
 ## Memory ResultIO and IResultOperations
 
+class MemoryResultIO(ResultIO):
+    def __init__(self):
+        # May be used for writing results to disk later
+        root_temp_dir = Path(tempfile.gettempdir()).resolve()
+        location: str = str(root_temp_dir / f"memory-{uuid.uuid4()}")
+
+        super().__init__(location)
+
+        # Memory Storage using Dictionary
+        self._memory_store = {}
+
+    @property
+    def memory_store(self) -> dict[str, Result]:
+        return self._memory_store
+
+    def write_result(self, result: Result, node_label: AnyStr) -> None:
+        """Write the result to the in-memory store."""
+        self._memory_store[node_label] = result
+
+    def read_result(self, node_label: AnyStr) -> Result:
+        """Read the result from the in-memory store."""
+        if node_label not in self._memory_store:
+            raise ResultIOError(f"No result found for node_label '{node_label}'")
+
+        return self._memory_store[node_label]
 
 #=============================================================================================
 ## Local ResultIO and IResultOperations
