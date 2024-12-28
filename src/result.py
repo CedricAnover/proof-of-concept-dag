@@ -4,7 +4,7 @@ import tempfile
 import uuid
 import pickle
 from pathlib import Path
-from typing import Any, AnyStr, Type, Optional, Sequence, Protocol
+from typing import Any, AnyStr, Type, Optional, Sequence, Protocol, Dict
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 
@@ -30,6 +30,16 @@ class Result(BaseModel):
 
 
 class ISerializeDeserialize(ABC):
+    @property
+    @abstractmethod
+    def file_extension(self) -> str:
+        """
+        Returns the file extension.
+
+        The file extension must NOT include dot (e.g. ".json").
+        """
+        pass
+
     @abstractmethod
     def serialize(self, result: Result, *args, **kwargs) -> AnyStr:
         pass
@@ -78,6 +88,10 @@ class IResultOperations(ABC):
 ## JSON
 
 class JsonSerializer(ISerializeDeserialize):
+    @property
+    def file_extension(self) -> str:
+        return "json"
+
     def serialize(self, result: Result, *args, **kwargs) -> str:
         return result.model_dump_json(*args, **kwargs)
 
@@ -88,24 +102,16 @@ class JsonSerializer(ISerializeDeserialize):
 ## Pickle
 
 class PickleSerializer(ISerializeDeserialize):
+    @property
+    def file_extension(self) -> str:
+        return "pkl"
+
     def serialize(self, result: Result, *args, **kwargs) -> bytes:
         return pickle.dumps(result, *args, **kwargs)
 
     def deserialize(self, result_str: bytes, *args, **kwargs) -> Result:
         return pickle.loads(result_str)
 
-#=============================================================================================
-
-def _get_file_extension(serializer: ISerializeDeserialize) -> str:
-    """Retuns the file extension based on the given serializer."""
-    if not isinstance(serializer, ISerializeDeserialize):
-        raise ResultIO("serializer must be a subclass of ISerializeDeserialize")
-
-    if isinstance(serializer, JsonSerializer):
-        return "json"
-
-    if isinstance(serializer, PickleSerializer):
-        return "pkl"
 
 #=============================================================================================
 ## Memory ResultIO and IResultOperations
@@ -119,10 +125,10 @@ class MemoryResultIO(ResultIO):
         super().__init__(location, serializer)
 
         # Memory Storage using Dictionary
-        self._memory_store = {}
+        self._memory_store: Dict[str, Result] = {}
 
     @property
-    def memory_store(self) -> dict[str, Result]:
+    def memory_store(self) -> Dict[str, Result]:
         return self._memory_store
 
     def write_result(self, result: Result, node_label: AnyStr) -> None:
@@ -131,10 +137,10 @@ class MemoryResultIO(ResultIO):
 
     def read_result(self, node_label: AnyStr) -> Result:
         """Read the result from the in-memory store."""
-        if node_label not in self._memory_store:
-            raise ResultIOError(f"No result found for node_label '{node_label}'")
-
-        return self._memory_store[node_label]
+        try:
+            return self._memory_store[node_label]
+        except KeyError:
+            raise ResultIOError(f"Result not found for node: {node_label}")
 
 
 class MemoryResultOperations(IResultOperations):
@@ -153,6 +159,7 @@ class MemoryResultOperations(IResultOperations):
     def transfer_results(self, dest_location: str) -> None:
         src_dir_path = Path(self.result_io.location).resolve()
         dest_dir_path = Path(dest_location).resolve()  # Destination location must be a local directory
+        file_extension = self.result_io.serializer.file_extension
 
         if not dest_dir_path.exists():
             dest_dir_path.mkdir(parents=True, exist_ok=True)
@@ -164,9 +171,9 @@ class MemoryResultOperations(IResultOperations):
         for node_label, result in self.result_io.memory_store.items():
             file_path = self.result_location(node_label)
             content = self.result_io.serializer.serialize(result)
-            if isinstance(self.result_io.serializer, JsonSerializer):
+            if file_extension == "json":
                 file_path.write_text(content)
-            if isinstance(self.result_io.serializer, PickleSerializer):
+            elif file_extension == "pkl":
                 file_path.write_bytes(content)
 
         # Move result files from temporary result directory to custom directory
@@ -177,7 +184,7 @@ class MemoryResultOperations(IResultOperations):
 
     def result_location(self, node_label: str) -> Path:
         location_dir = Path(self.result_io.location).resolve()
-        file_extension = _get_file_extension(self.result_io.serializer)
+        file_extension = self.result_io.serializer.file_extension
         file_path = location_dir / f"{node_label}.{file_extension}"
         return file_path
 
@@ -185,29 +192,65 @@ class MemoryResultOperations(IResultOperations):
 ## Local ResultIO and IResultOperations
 
 class LocalResultIO(ResultIO):
-    def write_result(self, result: Result, node_label: AnyStr, *args, **kwargs) -> None:
-        ...
+    def write_result(self, result: Result, node_label: AnyStr) -> None:
+        location_dir = Path(self.location).resolve()
+        file_extension = self.serializer.file_extension
+        file_path = location_dir / f"{node_label}.{file_extension}"
+
+        # Serialize the result
+        content = self.serializer.serialize(result)
+
+        # Validate if parent directory exists; create if not
+        if not location_dir.exists():
+            err_msg = f"The results directory does not exist.\n{location_dir}"
+            raise ResultIOError(err_msg)
+
+        # Write to file
+        if file_extension == "json":
+            file_path.write_text(content)
+        elif file_extension == "pkl":
+            file_path.write_bytes(content)
 
     def read_result(self, node_label: AnyStr, *args, **kwargs) -> Result:
-        return ...
+        location_dir = Path(self.location).resolve()
+        file_extension = self.serializer.file_extension
+        file_path = location_dir / f"{node_label}.{file_extension}"
+
+        # Validate that the result file path exists
+        if not file_path.exists():
+            err_msg = f"The result file path does not exist.\n{file_path}"
+            raise ResultIOError(err_msg)
+
+        if file_extension == "json":
+            return file_path.read_text()
+        elif file_extension == "pkl":
+            return file_path.read_bytes()
 
 
 class LocalResultOperations(IResultOperations):
-    def __init__(self, location: str):
-        result_io = LocalResultIO(location)
-        super().__init__(result_io)
+    def create_location(self) -> None:
+        Path(self.result_io.location).resolve().mkdir(parents=True, exist_ok=True)
 
-    def create_location(self, *args, **kwargs):
-        ...
-    
-    def delete_location(self, *args, **kwargs):
-        ...
-    
-    def transfer_results(self, dest_location, *args, **kwargs):
-        ...
-    
-    def result_location(self, node_label, *args, **kwargs):
-        return ...
+    def delete_location(self, *args, **kwargs) -> None:
+        location_dir = str(Path(self.result_io.location).resolve())
+        shutil.rmtree(location_dir, *args, ignore_errors=True, **kwargs)
+
+    def transfer_results(self, dest_location: str, *args, **kwargs):
+        dest_dir_path = Path(dest_location).resolve()
+        src_dir_path = Path(self.result_io.location).resolve()
+
+        if not dest_dir_path.exists():
+            dest_dir_path.mkdir(parents=True, exist_ok=True)
+
+        if not dest_dir_path.is_dir():
+            raise ResultIOError("The given destination directory is not a directory.")
+
+        shutil.move(src_dir_path, dest_dir_path)
+
+    def result_location(self, node_label: str) -> Path:
+        location_dir_path = Path(self.result_io.location).resolve()
+        file_extension = self.result_io.serializer.file_extension
+        return location_dir_path / f"{node_label}.{file_extension}"
 
 #=============================================================================================
 ## TODO: Remote ResultIO and IResultOperations (e.g. SFTP)
