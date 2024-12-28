@@ -49,7 +49,7 @@ class Node(BaseModel):
         return value
 
     @field_validator("status")
-    def validate_label(cls, value: NodeStateEnum):
+    def validate_status(cls, value: NodeStateEnum):
         if not isinstance(value, NodeStateEnum):
             raise NodeError("Node status must be an NodeStateEnum.")
         return value
@@ -61,7 +61,8 @@ class Node(BaseModel):
               dependencies: List["Node"],
               result_io: ResultIO,
               raise_error: bool = True,
-              use_deps: bool = False
+              use_deps: bool = False,
+              *args, **kwargs
               ) -> Result:
         # Set Node Status to RUNNING
         self.status = NodeStateEnum.RUNNING
@@ -76,7 +77,7 @@ class Node(BaseModel):
                     raise NodeError(err)
 
         try:
-            result_data = self.callback(self.label, deps_dict)
+            result_data = self.callback(self.label, deps_dict, *args, **kwargs)
             self.status = NodeStateEnum.COMPLETED  # Set Node Status to COMPLETED
             result = Result(
                 node_label=self.label,
