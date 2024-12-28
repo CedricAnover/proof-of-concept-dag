@@ -394,8 +394,7 @@ def dag_task(dag: Dag,
             return ...
 
     Raises:
-        ValueError: If `func_args` is an empty tuple and the function to be decorated has positional arguments. Or
-            if `func_args` is given when the function does not have any positional arguments.
+        ValueError: If `func_args` is an empty tuple and the function to be decorated has positional arguments.
     """
 
     def outer(func: Callable[[Any], Any]):
@@ -417,14 +416,17 @@ def dag_task(dag: Dag,
         # Throw an error if the function to be decorated has required positional arguments
         # and `dag_task` parameter `func_args` is empty.
         if _func_args and not init_args:
-            err_msg = "func_args tuple must be given if the function to be decorated has positional arguments."
+            err_msg = "`func_args` tuple must be given if the function to be decorated has positional arguments."
             logger.error(err_msg)
             raise ValueError(err_msg)
 
         if not _func_args and init_args:
-            err_msg = "func_args must not be given if the function to be decorated only have keyword arguments."
+            err_msg = "`init_args` must be empty if the function does not have any positional arguments."
             logger.error(err_msg)
             raise ValueError(err_msg)
+
+        if func_kwargs:
+            raise ValueError("The function to be decorated must not have any keyword arguments.")
 
         # Create the Wrapper
         @functools.lru_cache(maxsize=lru_maxsize, typed=typed)
