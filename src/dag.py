@@ -1,10 +1,17 @@
+import inspect
+import ast
+import textwrap
 import functools
 import uuid
 from collections import deque
-from typing import Sequence, Tuple, Callable, Any
+from typing import Sequence, Tuple, Callable, Any, List, Dict
 
 from .result import Result
 from .node import Node
+from ._logger import create_logger
+
+
+logger = create_logger(__name__)
 
 
 def _remove_duplicates(lst: list) -> list:
@@ -160,7 +167,7 @@ def node_registrator(dag: Dag,
                      raise_error: bool = False,
                      ):
     """Decorator for wrapping a custom function as a node to the given DAG."""
-    
+
     depends_on = depends_on or [_NULL_NODE]
 
     if any(not isinstance(dep, (str, Node)) for dep in depends_on):
@@ -168,7 +175,12 @@ def node_registrator(dag: Dag,
 
     def outer(cb_func):
         node = dag[label] if label in dag.node_labels \
-            else Node(label, cb_func, use_deps=use_deps, raise_error=raise_error)
+            else Node(
+                label,
+                cb_func,
+                use_deps=use_deps,
+                raise_error=raise_error
+            )
 
         for dependency in depends_on:
             if isinstance(dependency, str):
@@ -231,3 +243,207 @@ class DagBuilder:
     def build(self) -> Dag:
         """Builds the `Dag`."""
         return self._dag
+
+
+def _get_called_function_objects(func: Callable) -> List[Callable]:
+    """Retrieves a list of callable function objects invoked within the given function's body."""
+    try:
+        # Retrieve the source code of the function
+        source_code = inspect.getsource(func)
+    except Exception as e:
+        raise RuntimeError(f"Unable to retrieve source code for function {func.__name__}: {e}")
+    
+    # Normalize indentation
+    source_code = textwrap.dedent(source_code)
+    
+    try:
+        # Parse the source code into an Abstract Syntax Tree (AST)
+        tree = ast.parse(source_code)
+    except SyntaxError as e:
+        raise RuntimeError(f"Syntax error while parsing source code of {func.__name__}: {e}")
+
+    class FunctionCallVisitor(ast.NodeVisitor):
+        """AST Visitor to collect function calls."""
+        def __init__(self):
+            self.called_functions = []
+
+        def visit_Call(self, node: ast.Call):
+            """Visit a call node and collect function names."""
+            if isinstance(node.func, ast.Name):  # Simple function call: `foo()`
+                self.called_functions.append(node.func.id)
+            elif isinstance(node.func, ast.Attribute):  # Method call: `obj.method()`
+                self.called_functions.append(node.func.attr)
+            self.generic_visit(node)
+
+    # Traverse the AST to collect function calls
+    visitor = FunctionCallVisitor()
+    visitor.visit(tree)
+
+    # Resolve function names to actual callable objects
+    resolved_functions = []
+    func_globals = func.__globals__
+
+    for func_name in visitor.called_functions:
+        # Ensure the function name is in the global scope and is callable
+        if func_name in func_globals and callable(func_globals[func_name]):
+            resolved_functions.append(func_globals[func_name])
+
+    return resolved_functions
+
+
+def _get_called_function_invocations(func: Callable) -> List[dict]:
+    """Retrieves details of function calls made within the given function's body."""
+    try:
+        # Retrieve and normalize the source code
+        source_code = inspect.getsource(func)
+        source_code = textwrap.dedent(source_code)
+    except Exception as e:
+        raise RuntimeError(f"Unable to retrieve source code for function {func.__name__}: {e}")
+
+    try:
+        # Parse the source code into an Abstract Syntax Tree (AST)
+        tree = ast.parse(source_code)
+    except SyntaxError as e:
+        raise RuntimeError(f"Syntax error while parsing source code of {func.__name__}: {e}")
+
+    class FunctionInvocationVisitor(ast.NodeVisitor):
+        """AST Visitor to collect details of function calls."""
+        def __init__(self):
+            self.invocations = []
+
+        def visit_Call(self, node: ast.Call):
+            """Capture function call details."""
+            invocation = {
+                "function_name": None,
+                "arguments": [],
+                "keywords": {}
+            }
+
+            # Function name (handles both `foo()` and `obj.method()`)
+            if isinstance(node.func, ast.Name):  # Simple function call
+                invocation["function_name"] = node.func.id
+            elif isinstance(node.func, ast.Attribute):  # Method call
+                invocation["function_name"] = node.func.attr
+
+            # Positional arguments
+            invocation["arguments"] = [ast.dump(arg) for arg in node.args]
+
+            # Keyword arguments
+            invocation["keywords"] = {
+                kw.arg: ast.dump(kw.value) for kw in node.keywords if kw.arg
+            }
+
+            self.invocations.append(invocation)
+            self.generic_visit(node)
+
+    # Traverse the AST to collect function invocations
+    visitor = FunctionInvocationVisitor()
+    visitor.visit(tree)
+
+    return visitor.invocations
+
+
+def dag_task(dag: Dag,
+             lru_maxsize: int = None,
+             typed: bool = False,
+             raise_error=True,
+             init_args: tuple = ()
+             ):
+    """
+    A decorator to wrap a function as a task node in a Directed Acyclic Graph (DAG).
+
+    This decorator registers a function as a node in the given `Dag` instance, establishing dependencies based on the functions it calls.
+    The wrapped function can be executed with the provided DAG structure, which automatically resolves the dependencies between nodes.
+
+    Args:
+        dag (Dag): The DAG instance where the task node will be registered.
+        lru_maxsize (int, optional): The maximum size for the LRU cache on the function's wrapper. Default is None, meaning no cache limit.
+        typed (bool, optional): Arguments of different types will be cached separately.. Default is False.
+        init_args (tuple, optional): The initial values for positional arguments of the function being decorated. Default is ().
+            This must be given if the function to be decorated has positional arguments.
+
+    Returns:
+        Callable: The decorated function, now wrapped with task-node functionality.
+
+    Notes:
+        - The function will be associated with a unique node label generated from the function's name.
+        - The decorator automatically identifies and establishes dependencies between nodes based on other functions 
+            that the wrapped function calls, assuming these functions are registered as nodes in the DAG.
+        - The wrapped function can accept arbitrary arguments and keyword arguments, which will be passed to
+            the callback function when invoked in the context of the DAG.
+        - Due to the design, all dag tasks (nodes) would get invoked regardless if it has dependencies or not. If another
+            dag task tries to invoke its dependencies, it will only used the cached result if it has the same argument
+            combination.
+        - If the function has keyword arguments, event if another task invoked it with same argument,
+            it will not use the cache invoked by the node itself.
+        - For now, its best practice to use positional arguments for the function to be decorated, making
+            sure that there is initial value(s) in `func_args` parameter of the dag task decorator.
+
+    Example:
+        @dag_task(dag, raise_error=True, func_args=(2,))
+        def task1(arg1):
+            ...
+            return ...
+
+        @dag_task(dag, raise_error=False)
+        def task2():
+            ...
+            value = 3
+            result_1 = task1(value)
+            ...
+            return ...
+
+    Raises:
+        ValueError: If `func_args` is an empty tuple and the function to be decorated has positional arguments. Or
+            if `func_args` is given when the function does not have any positional arguments.
+    """
+
+    def outer(func: Callable[[Any], Any]):
+        # Mark the function with the associated node label
+        node_label_ = "node-" + func.__name__
+        setattr(func, "node_label", node_label_)
+
+        # Get all the function call in `func` and extract all node dependencies
+        dep_node_labels = [fn.node_label for fn in _get_called_function_objects(func) if hasattr(fn, "node_label")]
+        dep_node_labels = _remove_duplicates(dep_node_labels)
+        dep_nodes = [dep_node for dep_node in dag.nodes if dep_node.label in dep_node_labels]
+
+        # Get the signature of the function and separate args and kwargs
+        signature = inspect.signature(func)
+        parameters = signature.parameters
+        _func_args = [param for param, value in parameters.items() if value.default == inspect.Parameter.empty]
+        func_kwargs = {param: value.default for param, value in parameters.items() if value.default != inspect.Parameter.empty}
+
+        # Throw an error if the function to be decorated has required positional arguments
+        # and `dag_task` parameter `func_args` is empty.
+        if _func_args and not init_args:
+            err_msg = "func_args tuple must be given if the function to be decorated has positional arguments."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        if not _func_args and init_args:
+            err_msg = "func_args must not be given if the function to be decorated only have keyword arguments."
+            logger.error(err_msg)
+            raise ValueError(err_msg)
+
+        # Create the Wrapper
+        @functools.lru_cache(maxsize=lru_maxsize, typed=typed)
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            result_data = func(*args, **kwargs)
+            return result_data
+
+        # Create a new callback function
+        @node_registrator(
+            dag,
+            node_label_,
+            depends_on=dep_nodes,
+            use_deps=False,  # This decorator already uses LRU Cache (Memory)
+            raise_error=raise_error
+        )
+        def cb_func(node, dep_res) -> Any:
+            result_data = wrapper(*init_args, **func_kwargs)
+            return result_data
+
+        return wrapper
+    return outer

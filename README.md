@@ -12,7 +12,7 @@ Proof-of-Concept of Concurrent DAG
 - [] Feature: update architecture for better accomodation to _multiprocessing_ and _threading_.
 - [] Feature: create common interface for node and conduit (or dag?) as both are ***startable***.
 - [] Feature: update node & dag implementation where dag can be encapsulated in a node.
-- [] Feature: add decorator for building `Dag` without explicitly specifying the dependencies and just reference other DAG callbacks (use `inspect` module?). For better UX/UI.
+- [X] Feature: add decorator for building `Dag` without explicitly specifying the dependencies and just reference other DAG callbacks (use `inspect` module?). For better UX/UI.
 - [] Enhance: modularize `node_registrator` & `DagBuilder`, and remove boilerplate codes.
 - [] Enhance: move the **timeout** logic to node instead of conduit, if possible.
 - [] ...
