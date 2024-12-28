@@ -28,16 +28,11 @@ class ResultDataError(ResultError):
     pass
 
 
-class ResultData(BaseModel):
-    """Base class for all result data."""
-    pass
-
-
 class Result(BaseModel):
     """Represents a result including node metadata and associated result data."""
     node_label: str = Field(..., description="Node label associated with the result.")
     is_success: bool = Field(..., description="Completion state of a node (Success or Fail).")
-    result_data: Optional[ResultData] = Field(None, description="Output result of the node.")
+    result_data: Optional[Any] = Field(None, description="Output result of the node.")
     error: Optional[str] = Field(None, description="Error message if an error occurred.")
     id_: uuid.UUID = Field(default_factory=uuid.uuid4, description="A unique identifier for the result.")
 
