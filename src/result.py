@@ -41,8 +41,9 @@ class ISerializeDeserialize(ABC):
 
 class ResultIO(ABC):
     # The optionality of Pickle, JSON, CSV, etc. has to be decided & implemented here.
-    def __init__(self, location: str):
+    def __init__(self, location: str, serializer: ISerializeDeserialize):
         self.location = location  # Memory, Local File/DB, or Remote File/DB
+        self.serializer = serializer
 
     @abstractmethod
     def write_result(self, result: Result, node_label: AnyStr, *args, **kwargs) -> None:
@@ -94,15 +95,28 @@ class PickleSerializer(ISerializeDeserialize):
         return pickle.loads(result_str)
 
 #=============================================================================================
+
+def _get_file_extension(serializer: ISerializeDeserialize) -> str:
+    """Retuns the file extension based on the given serializer."""
+    if not isinstance(serializer, ISerializeDeserialize):
+        raise ResultIO("serializer must be a subclass of ISerializeDeserialize")
+
+    if isinstance(serializer, JsonSerializer):
+        return "json"
+
+    if isinstance(serializer, PickleSerializer):
+        return "pkl"
+
+#=============================================================================================
 ## Memory ResultIO and IResultOperations
 
 class MemoryResultIO(ResultIO):
-    def __init__(self):
+    def __init__(self, location: Optional[str] = None, serializer: Optional[ISerializeDeserialize] = JsonSerializer()):
         # May be used for writing results to disk later
         root_temp_dir = Path(tempfile.gettempdir()).resolve()
-        location: str = str(root_temp_dir / f"memory-{uuid.uuid4()}")
+        location = location or str(root_temp_dir / f"memory-{uuid.uuid4()}")
 
-        super().__init__(location)
+        super().__init__(location, serializer)
 
         # Memory Storage using Dictionary
         self._memory_store = {}
@@ -122,9 +136,78 @@ class MemoryResultIO(ResultIO):
 
         return self._memory_store[node_label]
 
+
+class MemoryResultOperations(IResultOperations):
+    def __init__(self, result_io: MemoryResultIO):
+        if not isinstance(result_io, MemoryResultIO):
+            raise ResultIOError("result_io must be a MemoryResultIO.")
+        super().__init__(result_io)
+
+    def create_location(self) -> None:
+        Path(self.result_io.location).resolve().mkdir(parents=True, exist_ok=True)
+
+    def delete_location(self) -> None:
+        location_dir = str(Path(self.result_io.location).resolve())
+        shutil.rmtree(location_dir, ignore_errors=True)
+
+    def transfer_results(self, dest_location: str) -> None:
+        src_dir_path = Path(self.result_io.location).resolve()
+        dest_dir_path = Path(dest_location).resolve()  # Destination location must be a local directory
+
+        if not dest_dir_path.exists():
+            dest_dir_path.mkdir(parents=True, exist_ok=True)
+        assert dest_dir_path.is_dir(), f"{dest_dir_path} is not a directory."
+
+        # Create the temporary location (overhead)
+        self.create_location()
+
+        for node_label, result in self.result_io.memory_store.items():
+            file_path = self.result_location(node_label)
+            content = self.result_io.serializer.serialize(result)
+            if isinstance(self.result_io.serializer, JsonSerializer):
+                file_path.write_text(content)
+            if isinstance(self.result_io.serializer, PickleSerializer):
+                file_path.write_bytes(content)
+
+        # Move result files from temporary result directory to custom directory
+        shutil.move(src_dir_path, dest_dir_path)
+
+        # Delete the temporary result directory
+        self.delete_location()
+
+    def result_location(self, node_label: str) -> Path:
+        location_dir = Path(self.result_io.location).resolve()
+        file_extension = _get_file_extension(self.result_io.serializer)
+        file_path = location_dir / f"{node_label}.{file_extension}"
+        return file_path
+
 #=============================================================================================
 ## Local ResultIO and IResultOperations
 
+class LocalResultIO(ResultIO):
+    def write_result(self, result: Result, node_label: AnyStr, *args, **kwargs) -> None:
+        ...
+
+    def read_result(self, node_label: AnyStr, *args, **kwargs) -> Result:
+        return ...
+
+
+class LocalResultOperations(IResultOperations):
+    def __init__(self, location: str):
+        result_io = LocalResultIO(location)
+        super().__init__(result_io)
+
+    def create_location(self, *args, **kwargs):
+        ...
+    
+    def delete_location(self, *args, **kwargs):
+        ...
+    
+    def transfer_results(self, dest_location, *args, **kwargs):
+        ...
+    
+    def result_location(self, node_label, *args, **kwargs):
+        return ...
 
 #=============================================================================================
-## TODO: Remote ResultIO and IResultOperations using SSH protocol
+## TODO: Remote ResultIO and IResultOperations (e.g. SFTP)
