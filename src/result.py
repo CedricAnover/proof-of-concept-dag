@@ -4,7 +4,7 @@ import tempfile
 import uuid
 import pickle
 from pathlib import Path
-from typing import Any, AnyStr, Type, Optional, Sequence, Protocol, Dict
+from typing import Any, Optional, Dict, Protocol, Union
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 
@@ -14,80 +14,216 @@ class ResultError(Exception):
 
 
 class ResultIOError(ResultError):
+    """Raised when there is an I/O error related to result processing."""
     pass
 
 
-class ResultData(BaseModel, Protocol):
+class ResultNotFoundError(ResultIOError):
+    """Raised when a result for a specific node label is not found."""
+    pass
+
+
+class ResultDataError(ResultError):
+    """Raised when there is an issue with the result data."""
+    pass
+
+
+class ResultData(BaseModel):
     """Base class for all result data."""
+    pass
 
 
 class Result(BaseModel):
+    """Represents a result including node metadata and associated result data."""
     node_label: str = Field(..., description="Node label associated with the result.")
-    is_success: bool = Field(..., description="Completion state of a node (Sucess or Fail).")
-    result_data: Optional[ResultData] = Field(None, description="Output result of the node. Note that this should be serializable/deserializable.")
-    error: Optional[str] = Field(None, description="Error message if an error occurred after running a node.")
+    is_success: bool = Field(..., description="Completion state of a node (Success or Fail).")
+    result_data: Optional[ResultData] = Field(None, description="Output result of the node.")
+    error: Optional[str] = Field(None, description="Error message if an error occurred.")
     id_: uuid.UUID = Field(default_factory=uuid.uuid4, description="A unique identifier for the result.")
+
+    def validate(self) -> None:
+        """Ensure result consistency (e.g., `error` should be None if `is_success` is True)."""
+        if self.is_success and self.error:
+            raise ResultDataError(f"Success result cannot have an error message.")
+        if not self.is_success and not self.error:
+            raise ResultDataError(f"Failed result must have an error message.")
 
 
 class ISerializeDeserialize(ABC):
     @property
     @abstractmethod
     def file_extension(self) -> str:
-        """
-        Returns the file extension.
-
-        The file extension must NOT include dot (e.g. ".json").
-        """
+        """Returns the file extension without a dot."""
         pass
 
     @abstractmethod
-    def serialize(self, result: Result, *args, **kwargs) -> AnyStr:
+    def serialize(self, result: Result) -> Union[str, bytes]:
+        """Serializes the result to a string or byte format."""
         pass
 
     @abstractmethod
-    def deserialize(self, result_str: AnyStr, *args, **kwargs) -> Result:
+    def deserialize(self, data: Union[str, bytes]) -> Result:
+        """Deserializes data to a Result object."""
         pass
 
 
 class ResultIO(ABC):
-    # The optionality of Pickle, JSON, CSV, etc. has to be decided & implemented here.
+    """Abstract class for handling I/O operations for results."""
     def __init__(self, location: str, serializer: ISerializeDeserialize):
-        self.location = location  # Memory, Local File/DB, or Remote File/DB
+        self.location = location
         self.serializer = serializer
 
     @abstractmethod
-    def write_result(self, result: Result, node_label: AnyStr, *args, **kwargs) -> None:
+    def write_result(self, result: Result) -> None:
+        """Write result to storage."""
         pass
 
     @abstractmethod
-    def read_result(self, node_label: AnyStr, *args, **kwargs) -> Result:
+    def read_result(self, node_label: str) -> Result:
+        """Read result from storage."""
         pass
 
 
+class MemoryResultIO(ResultIO):
+    """In-memory Result I/O implementation."""
+    def __init__(self, location: Optional[str] = None, serializer: Optional[ISerializeDeserialize] = None):
+        location = location or f"memory-{uuid.uuid4()}"
+        serializer = serializer or JsonSerializer()
+        super().__init__(location, serializer)
+        self._memory_store: Dict[str, Result] = {}
+
+    def write_result(self, result: Result) -> None:
+        """Write result to in-memory store."""
+        self._memory_store[result.node_label] = result
+
+    def read_result(self, node_label: str) -> Result:
+        """Retrieve result from memory store."""
+        try:
+            return self._memory_store[node_label]
+        except KeyError:
+            raise ResultNotFoundError(f"Result not found for node: {node_label}")
+
+
+class LocalResultIO(ResultIO):
+    """Local file system result I/O implementation."""
+    def write_result(self, result: Result) -> None:
+        """Write result to a local file."""
+        location_dir = Path(self.location).resolve()
+        file_path = location_dir / f"{result.node_label}.{self.serializer.file_extension}"
+
+        # Ensure directory exists
+        if not location_dir.exists():
+            raise ResultIOError(f"Directory does not exist: {location_dir}")
+
+        content = self.serializer.serialize(result)
+
+        # Write to file
+        try:
+            with open(file_path, 'wb' if self.serializer.file_extension == "pkl" else 'w') as f:
+                f.write(content)
+        except Exception as e:
+            raise ResultIOError(f"Error writing result to {file_path}: {e}")
+
+    def read_result(self, node_label: str) -> Result:
+        """Read result from a local file."""
+        location_dir = Path(self.location).resolve()
+        file_path = location_dir / f"{node_label}.{self.serializer.file_extension}"
+
+        # Check if the file exists
+        if not file_path.exists():
+            raise ResultNotFoundError(f"Result file not found: {file_path}")
+
+        try:
+            with open(file_path, 'rb' if self.serializer.file_extension == "pkl" else 'r') as f:
+                data = f.read()
+            return self.serializer.deserialize(data)
+        except Exception as e:
+            raise ResultIOError(f"Error reading result from {file_path}: {e}")
+
+
 class IResultOperations(ABC):
+    """Abstract class for operations related to result management."""
     def __init__(self, result_io: ResultIO):
         self.result_io = result_io
 
     @abstractmethod
-    def create_location(self, *args, **kwargs) -> None:
+    def create_location(self) -> None:
+        """Create the result storage location."""
         pass
 
     @abstractmethod
-    def delete_location(self, *args, **kwargs) -> None:
+    def delete_location(self) -> None:
+        """Delete the result storage location."""
         pass
 
     @abstractmethod
-    def transfer_results(self, dest_location: AnyStr | Path, *args, **kwargs) -> None:
+    def transfer_results(self, dest_location: str) -> None:
+        """Transfer results to a new location."""
         pass
 
     @abstractmethod
-    def result_location(self, node_label: AnyStr, *args, **kwargs) -> AnyStr | Path:
+    def result_location(self, node_label: str) -> str:
+        """Get the result file path for a given node label."""
         pass
 
-#=============================================================================================
-## JSON
+
+class MemoryResultOperations(IResultOperations):
+    """Memory-based operations for results."""
+    def create_location(self) -> None:
+        """No location creation required for in-memory store."""
+        pass
+
+    def delete_location(self) -> None:
+        """Clear the memory store."""
+        self.result_io._memory_store.clear()
+
+    def transfer_results(self, dest_location: str) -> None:
+        """Not applicable for in-memory storage."""
+        raise NotImplementedError("Transfer results is not supported for in-memory storage.")
+
+    def result_location(self, node_label: str) -> str:
+        """Generate a result location string."""
+        return f"{self.result_io.location}/{node_label}"
+
+
+class LocalResultOperations(IResultOperations):
+    @classmethod
+    def create_with_local_result_io(cls, location: str, serializer: ISerializeDeserialize) -> "LocalResultOperations":
+        """Create LocalResultOperations with LocalResultIO constructor parameters."""
+        result_io = LocalResultIO(location, serializer)
+        return cls(result_io)
+
+    """Local file-based operations for results."""
+    def create_location(self) -> None:
+        """Ensure that the storage directory exists."""
+        location_path = Path(self.result_io.location).resolve()
+        location_path.mkdir(parents=True, exist_ok=True)
+
+    def delete_location(self) -> None:
+        """Remove the result storage directory."""
+        location_path = Path(self.result_io.location).resolve()
+        try:
+            shutil.rmtree(location_path)
+        except Exception as e:
+            raise ResultIOError(f"Error deleting directory {location_path}: {e}")
+
+    def transfer_results(self, dest_location: str) -> None:
+        """Move results to a new location."""
+        location_path = Path(self.result_io.location).resolve()
+        dest_path = Path(dest_location).resolve()
+        try:
+            shutil.move(str(location_path), str(dest_path))
+        except Exception as e:
+            raise ResultIOError(f"Error transferring results from {location_path} to {dest_path}: {e}")
+
+    def result_location(self, node_label: str) -> str:
+        """Generate the full file path for the result."""
+        location_dir = Path(self.result_io.location).resolve()
+        return str(location_dir / f"{node_label}.{self.result_io.serializer.file_extension}")
+
 
 class JsonSerializer(ISerializeDeserialize):
+    """JSON serialization/deserialization for Result objects."""
     @property
     def file_extension(self) -> str:
         return "json"
@@ -95,162 +231,18 @@ class JsonSerializer(ISerializeDeserialize):
     def serialize(self, result: Result, *args, **kwargs) -> str:
         return result.model_dump_json(*args, **kwargs)
 
-    def deserialize(self, result_str: str, *args, **kwargs) -> Result:
-        return Result.model_validate_json(result_str, *args, **kwargs)
+    def deserialize(self, data: str, *args, **kwargs) -> Result:
+        return Result.model_validate_json(data, *args, **kwargs)
 
-#=============================================================================================
-## Pickle
 
 class PickleSerializer(ISerializeDeserialize):
+    """Pickle serialization/deserialization for Result objects."""
     @property
     def file_extension(self) -> str:
         return "pkl"
 
-    def serialize(self, result: Result, *args, **kwargs) -> bytes:
-        return pickle.dumps(result, *args, **kwargs)
+    def serialize(self, result: Result) -> bytes:
+        return pickle.dumps(result)
 
-    def deserialize(self, result_str: bytes, *args, **kwargs) -> Result:
-        return pickle.loads(result_str)
-
-
-#=============================================================================================
-## Memory ResultIO and IResultOperations
-
-class MemoryResultIO(ResultIO):
-    def __init__(self, location: Optional[str] = None, serializer: Optional[ISerializeDeserialize] = JsonSerializer()):
-        # May be used for writing results to disk later
-        root_temp_dir = Path(tempfile.gettempdir()).resolve()
-        location = location or str(root_temp_dir / f"memory-{uuid.uuid4()}")
-
-        super().__init__(location, serializer)
-
-        # Memory Storage using Dictionary
-        self._memory_store: Dict[str, Result] = {}
-
-    @property
-    def memory_store(self) -> Dict[str, Result]:
-        return self._memory_store
-
-    def write_result(self, result: Result, node_label: AnyStr) -> None:
-        """Write the result to the in-memory store."""
-        self._memory_store[node_label] = result
-
-    def read_result(self, node_label: AnyStr) -> Result:
-        """Read the result from the in-memory store."""
-        try:
-            return self._memory_store[node_label]
-        except KeyError:
-            raise ResultIOError(f"Result not found for node: {node_label}")
-
-
-class MemoryResultOperations(IResultOperations):
-    def __init__(self, result_io: MemoryResultIO):
-        if not isinstance(result_io, MemoryResultIO):
-            raise ResultIOError("result_io must be a MemoryResultIO.")
-        super().__init__(result_io)
-
-    def create_location(self) -> None:
-        Path(self.result_io.location).resolve().mkdir(parents=True, exist_ok=True)
-
-    def delete_location(self) -> None:
-        location_dir = str(Path(self.result_io.location).resolve())
-        shutil.rmtree(location_dir, ignore_errors=True)
-
-    def transfer_results(self, dest_location: str) -> None:
-        src_dir_path = Path(self.result_io.location).resolve()
-        dest_dir_path = Path(dest_location).resolve()  # Destination location must be a local directory
-        file_extension = self.result_io.serializer.file_extension
-
-        if not dest_dir_path.exists():
-            dest_dir_path.mkdir(parents=True, exist_ok=True)
-        assert dest_dir_path.is_dir(), f"{dest_dir_path} is not a directory."
-
-        # Create the temporary location (overhead)
-        self.create_location()
-
-        for node_label, result in self.result_io.memory_store.items():
-            file_path = self.result_location(node_label)
-            content = self.result_io.serializer.serialize(result)
-            if file_extension == "json":
-                file_path.write_text(content)
-            elif file_extension == "pkl":
-                file_path.write_bytes(content)
-
-        # Move result files from temporary result directory to custom directory
-        shutil.move(src_dir_path, dest_dir_path)
-
-        # Delete the temporary result directory
-        self.delete_location()
-
-    def result_location(self, node_label: str) -> Path:
-        location_dir = Path(self.result_io.location).resolve()
-        file_extension = self.result_io.serializer.file_extension
-        file_path = location_dir / f"{node_label}.{file_extension}"
-        return file_path
-
-#=============================================================================================
-## Local ResultIO and IResultOperations
-
-class LocalResultIO(ResultIO):
-    def write_result(self, result: Result, node_label: AnyStr) -> None:
-        location_dir = Path(self.location).resolve()
-        file_extension = self.serializer.file_extension
-        file_path = location_dir / f"{node_label}.{file_extension}"
-
-        # Serialize the result
-        content = self.serializer.serialize(result)
-
-        # Validate if parent directory exists; create if not
-        if not location_dir.exists():
-            err_msg = f"The results directory does not exist.\n{location_dir}"
-            raise ResultIOError(err_msg)
-
-        # Write to file
-        if file_extension == "json":
-            file_path.write_text(content)
-        elif file_extension == "pkl":
-            file_path.write_bytes(content)
-
-    def read_result(self, node_label: AnyStr, *args, **kwargs) -> Result:
-        location_dir = Path(self.location).resolve()
-        file_extension = self.serializer.file_extension
-        file_path = location_dir / f"{node_label}.{file_extension}"
-
-        # Validate that the result file path exists
-        if not file_path.exists():
-            err_msg = f"The result file path does not exist.\n{file_path}"
-            raise ResultIOError(err_msg)
-
-        if file_extension == "json":
-            return file_path.read_text()
-        elif file_extension == "pkl":
-            return file_path.read_bytes()
-
-
-class LocalResultOperations(IResultOperations):
-    def create_location(self) -> None:
-        Path(self.result_io.location).resolve().mkdir(parents=True, exist_ok=True)
-
-    def delete_location(self, *args, **kwargs) -> None:
-        location_dir = str(Path(self.result_io.location).resolve())
-        shutil.rmtree(location_dir, *args, ignore_errors=True, **kwargs)
-
-    def transfer_results(self, dest_location: str, *args, **kwargs):
-        dest_dir_path = Path(dest_location).resolve()
-        src_dir_path = Path(self.result_io.location).resolve()
-
-        if not dest_dir_path.exists():
-            dest_dir_path.mkdir(parents=True, exist_ok=True)
-
-        if not dest_dir_path.is_dir():
-            raise ResultIOError("The given destination directory is not a directory.")
-
-        shutil.move(src_dir_path, dest_dir_path)
-
-    def result_location(self, node_label: str) -> Path:
-        location_dir_path = Path(self.result_io.location).resolve()
-        file_extension = self.result_io.serializer.file_extension
-        return location_dir_path / f"{node_label}.{file_extension}"
-
-#=============================================================================================
-## TODO: Remote ResultIO and IResultOperations (e.g. SFTP)
+    def deserialize(self, data: bytes) -> Result:
+        return pickle.loads(data)
