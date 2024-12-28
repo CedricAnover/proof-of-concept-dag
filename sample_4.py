@@ -3,7 +3,7 @@
 from pprint import pprint
 
 from src.conduit import AsyncConduit
-from src.result import Result, LocalResultIO, MemoryResultIO
+from src.result import Result, LocalResultIO, MemoryResultIO, JsonSerializer, PickleSerializer, LocalResultOperations
 from src.dag import DagBuilder
 from src.node import Node
 
@@ -35,10 +35,23 @@ if __name__ == "__main__":
     dag = dag_builder.build()
 
     for src, dst in dag.arcs:
+        if src.label.startswith("null-node"):
+            continue
         print(f"{src} --> {dst}")
     print()
 
-    # res_io = MemoryResultIO()
-    res_io = LocalResultIO()
-    conduit = AsyncConduit(dag, res_io)
-    conduit.start()
+    json_serializer = JsonSerializer()
+    pickle_serializer = PickleSerializer()
+
+    res_ops = LocalResultOperations.create_with_temp_location(json_serializer)
+    # res_io = res_ops.result_io
+    res_io = MemoryResultIO()
+
+    try:
+        res_ops.create_location()
+        async_conduit = AsyncConduit(dag, res_io, node_timeout=100)
+        async_conduit.start()
+    except Exception:
+        raise
+    finally:
+        res_ops.delete_location()

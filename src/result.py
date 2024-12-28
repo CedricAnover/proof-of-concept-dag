@@ -1,4 +1,4 @@
-import os
+import uuid
 import shutil
 import tempfile
 import uuid
@@ -108,7 +108,7 @@ class LocalResultIO(ResultIO):
 
         # Ensure directory exists
         if not location_dir.exists():
-            raise ResultIOError(f"Directory does not exist: {location_dir}")
+            location_dir.mkdir(parents=True, exist_ok=True)
 
         content = self.serializer.serialize(result)
 
@@ -185,6 +185,12 @@ class LocalResultOperations(IResultOperations):
     @classmethod
     def create_with_local_result_io(cls, location: str, serializer: ISerializeDeserialize) -> "LocalResultOperations":
         """Create LocalResultOperations with LocalResultIO constructor parameters."""
+        result_io = LocalResultIO(location, serializer)
+        return cls(result_io)
+
+    @classmethod
+    def create_with_temp_location(cls, serializer: ISerializeDeserialize) -> "LocalResultOperations":
+        location = str(Path(tempfile.gettempdir()).resolve() / f"dag-temp-{uuid.uuid4()}")
         result_io = LocalResultIO(location, serializer)
         return cls(result_io)
 

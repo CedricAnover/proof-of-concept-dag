@@ -1,9 +1,10 @@
 """Example: Using `ParallelConduits` to run multiple conduits in parallel."""
 
 import random
+import time
 
 from src.conduit import AsyncConduit, ParallelConduits
-from src.result import Result, LocalResultIO, MemoryResultIO
+from src.result import Result, LocalResultIO, MemoryResultIO, JsonSerializer, PickleSerializer, LocalResultOperations
 from src.dag import Dag
 from src.node import Node
 
@@ -51,8 +52,12 @@ def main():
     for _ in range(max_processors):
         dag = create_dag()
 
+        json_serializer = JsonSerializer()
+        pickle_serializer = PickleSerializer()
+
+        res_ops = LocalResultOperations.create_with_temp_location(pickle_serializer)
+        res_io = res_ops.result_io
         # res_io = MemoryResultIO()
-        res_io = LocalResultIO()
 
         async_conduit = AsyncConduit(dag, res_io)
         parallel_conduits.add_conduit(async_conduit)

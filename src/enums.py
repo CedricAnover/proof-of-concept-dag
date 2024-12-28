@@ -2,7 +2,7 @@ from enum import Enum
 
 
 class NodeStateEnum(Enum):
-    IDLE = "idle"
-    RUNNING = "running"
-    COMPLETED = "completed"
-    ERROR = "error"
+    IDLE = 1
+    RUNNING = 2
+    COMPLETE_SUCCESS = 3
+    COMPLETE_FAIL = 4

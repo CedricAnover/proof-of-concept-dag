@@ -1,10 +1,7 @@
-import pickle
-from typing import Any, Callable, Dict, List
-
-from pydantic import BaseModel, Field, field_validator
+from typing import Callable, Dict
 
 from .enums import NodeStateEnum
-from .result import Result, ResultIO
+from .result import *
 from ._logger import create_logger
 
 
@@ -15,85 +12,67 @@ class NodeError(Exception):
     pass
 
 
-class Node(BaseModel):
-    label: str = Field(..., description="Node Label.")
-    callback: Callable[[str, Dict[str, Result]], Any] = Field(..., description="Callback attached to the node.")
-    # Note: We may decide to drop this feature and should be managed by conduit (or maybe dag).
-    status: NodeStateEnum = Field(NodeStateEnum.IDLE, description="Node Status. Defaults to 'IDLE'.")
+class Node:
+    def __init__(self,
+                 label: str,
+                 callback: Callable[["Node", Dict[str, Result]], Any],
+                 use_deps: bool = True,
+                 raise_error: bool = False,
+                 *cb_args,
+                 **cb_kwargs
+                 ) -> None:
+        self.label = label
+        self.callback = callback
+        self.state: NodeStateEnum = NodeStateEnum.IDLE
 
-    @classmethod
-    def create(cls, label: str, callback: Callable) -> "Node":
-        if not label.strip():
-            raise ValueError("Label must not be empty or whitespace.")
-        if not callable(callback):
-            raise ValueError("Callback must be callable.")
+        self._raise_error = raise_error
+        self._use_deps = use_deps
+        self._cb_args = cb_args
+        self._cb_kwargs = cb_kwargs
 
-        return cls(label=label, callback=callback)
+    def __str__(self) -> str:
+        return self.label
 
-    def pickle_serialize(self) -> bytes:
-        return pickle.dumps(self)
+    def set_state(self, new_state: NodeStateEnum) -> None:
+        self.state = new_state
 
-    @classmethod
-    def pickle_deserialize(cls, data: bytes) -> "Node":
-        instance = pickle.loads(data)
-        if not isinstance(instance, cls):
-            raise NodeError("The data bytes must be deserializable to 'Node'.")
-        return instance
+    def start(self, dependencies: list["Node"], result_io: ResultIO) -> None:
+        # Set node state to RUNNING
+        self.set_state(NodeStateEnum.RUNNING)
 
-    @field_validator("label")
-    def validate_label(cls, value: str):
-        if not isinstance(value, str):
-            raise NodeError("Node label must be a string.")
-        if not value.strip():
-            raise NodeError("Node label must not be empty or just whitespace.")
-        return value
+        # Get dependency results, if specified
+        dep_results = dict()
+        if self._use_deps:
+            dep_results: dict[str, Result] = \
+                {dependency.label: result_io.read_result(dependency.label) for dependency in dependencies}
 
-    @field_validator("status")
-    def validate_status(cls, value: NodeStateEnum):
-        if not isinstance(value, NodeStateEnum):
-            raise NodeError("Node status must be an NodeStateEnum.")
-        return value
-
-    def get_deps(self, dependencies: List["Node"], result_io: ResultIO) -> Dict[str, Result]:
-        return {dependency.label: result_io.read_result(dependency.label) for dependency in dependencies}
-
-    def start(self,
-              dependencies: List["Node"],
-              result_io: ResultIO,
-              raise_error: bool = True,
-              use_deps: bool = False,
-              *args, **kwargs
-              ) -> Result:
-        # Set Node Status to RUNNING
-        self.status = NodeStateEnum.RUNNING
-
-        deps_dict = dict()
-        if use_deps:
-            try:
-                deps_dict = self.get_deps(dependencies, result_io)
-            except Exception as err:
-                logger.error(str(err))
-                if raise_error:
-                    raise NodeError(err)
-
+        result = None
         try:
-            result_data = self.callback(self.label, deps_dict, *args, **kwargs)
-            self.status = NodeStateEnum.COMPLETED  # Set Node Status to COMPLETED
+            # Perform Processing and get result data
+            result_data: Any = self.callback(self, dep_results, *self._cb_args, **self._cb_kwargs)
             result = Result(
                 node_label=self.label,
                 is_success=True,
                 result_data=result_data
             )
+
+            # Set node state to COMPLETE_SUCCESS
+            self.set_state(NodeStateEnum.COMPLETE_SUCCESS)
         except Exception as err:
-            logger.error(str(err))
-            self.status = NodeStateEnum.ERROR  # Set Node Status to ERROR
+            # Raise the error if specified in constructor
+            logger.error(err)
+            if self._raise_error:
+                raise NodeError(str(err))
+
             result = Result(
                 node_label=self.label,
                 is_success=False,
                 error=str(err)
             )
-            if raise_error:
-                raise NodeError(err)
+
+            # Set node state to COMPLETE_FAIL
+            self.set_state(NodeStateEnum.COMPLETE_FAIL)
         finally:
-            result_io.write_result(result)
-            return result
+            # Store Result object with ResultIO
+            if result:
+                result_io.write_result(result)

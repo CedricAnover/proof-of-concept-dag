@@ -1,9 +1,11 @@
 """Example: Using `node_registrator` decorator."""
 import time
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from src.conduit import AsyncConduit
-from src.result import Result, LocalResultIO, MemoryResultIO
+from src.result import Result, LocalResultIO, MemoryResultIO, JsonSerializer, PickleSerializer, LocalResultOperations
 from src.dag import Dag, node_registrator
 from src.node import Node
 
@@ -23,25 +25,41 @@ if __name__ == "__main__":
     # Create a Dag instance
     dag = Dag()
 
-    # Create the Source Nodes
-    node_1 = Node("1", my_callback)
-    node_2 = Node("2", my_callback, message="Hello World")
-    node_a = Node("A", my_callback)
-    node_b = Node("B", my_callback)
-
-
     def _cb_func(node: Node, dep_results: dict[str, Result]) -> Any:
         print(f"[node-{node.label}] Dependency Results: {dep_results}")
         return f"{node.label}-stdout"
 
 
-    # "Non-Source" nodes dependent on "Source" nodes must use a `Node` object instead of strings.
-    @node_registrator(dag, "3", depends_on=[node_1, node_2])
-    def cb_3(node, dep_results):
+    @node_registrator(dag, "1")
+    def cb_1(node, dep_results):
         return _cb_func(node, dep_results)
 
 
-    @node_registrator(dag, "4", depends_on=["3", node_a, node_b])
+    @node_registrator(dag, "2")
+    def cb_2(node, dep_results):
+        return _cb_func(node, dep_results)
+
+
+    @node_registrator(dag, "a")
+    def cb_a(node, dep_results):
+        return _cb_func(node, dep_results)
+
+
+    @node_registrator(dag, "b")
+    def cb_b(node, dep_results):
+        return _cb_func(node, dep_results)
+
+
+    # "Non-Source" nodes dependent on "Source" nodes must use a `Node` object instead of strings.
+    @node_registrator(dag, "3", depends_on=["1", "2"])
+    def cb_3(node, dep_results):
+        result_1 = dep_results["1"].result_data
+        result_2 = dep_results["2"].result_data
+        print(f"[node-{node.label}] Result-1: {result_1}")
+        print(f"[node-{node.label}] Result-2: {result_2}")
+
+
+    @node_registrator(dag, "4", depends_on=["3", "a", "b"])
     def cb_4(node, dep_results):
         time.sleep(5)
         return _cb_func(node, dep_results)
@@ -68,11 +86,23 @@ if __name__ == "__main__":
 
 
     for src, dst in dag.arcs:
+        if src.label.startswith("null-node"):
+            continue
         print(f"{src} --> {dst}")
     print()
 
+    json_serializer = JsonSerializer()
+    pickle_serializer = PickleSerializer()
 
-    # res_io = MemoryResultIO()
-    res_io = LocalResultIO()
-    async_conduit = AsyncConduit(dag, res_io, node_timeout=100)
-    async_conduit.start()
+    res_ops = LocalResultOperations.create_with_temp_location(json_serializer)
+    # res_io = res_ops.result_io
+    res_io = MemoryResultIO()
+
+    try:
+        res_ops.create_location()
+        async_conduit = AsyncConduit(dag, res_io, node_timeout=100)
+        async_conduit.start()
+    except Exception:
+        raise
+    finally:
+        res_ops.delete_location()

@@ -74,7 +74,7 @@ class ParallelConduits:
 
 
 class AsyncConduit(Conduit):
-    def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10, node_timeout: float = 30):
+    def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10, node_timeout: float = 300):
         super().__init__(dag, result_io)
         self.concurrency_limit = concurrency_limit
         self.node_timeout = node_timeout  # Timeout for node execution (in seconds)

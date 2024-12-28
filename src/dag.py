@@ -1,9 +1,8 @@
 import functools
 import uuid
 from collections import deque
-from typing import List, Tuple, Callable, Any
+from typing import Sequence, Tuple, Callable, Any
 
-from .enums import NodeStateEnum
 from .result import Result
 from .node import Node
 
@@ -17,16 +16,16 @@ def _remove_duplicates(lst: list) -> list:
 
 
 class Dag:
-    def __init__(self, arcs: List[Tuple[Node, Node]] | None = None):
-        self.arcs: List[Tuple[Node, Node]] = arcs or []
+    def __init__(self, arcs: Sequence[Tuple[Node, Node]] | None = None):
+        self.arcs: Sequence[Tuple[Node, Node]] = arcs or []
 
     @property
-    def sources(self) -> List[Node]:
+    def sources(self) -> Sequence[Node]:
         return _remove_duplicates(
             [x for x, _ in self.arcs if all((y, x) not in self.arcs for y, _ in self.arcs if y != x)])
 
     @property
-    def sinks(self) -> List[Node]:
+    def sinks(self) -> Sequence[Node]:
         return _remove_duplicates(
             [y for _, y in self.arcs
              if all((y, x) not in self.arcs
@@ -34,11 +33,11 @@ class Dag:
         )
 
     @property
-    def nodes(self) -> List[Node]:
+    def nodes(self) -> Sequence[Node]:
         return _remove_duplicates([x for x, _ in self.arcs] + [y for _, y in self.arcs])
 
     @property
-    def node_labels(self) -> List[str]:
+    def node_labels(self) -> Sequence[str]:
         return [node.label for node in self.nodes]
 
     def __getitem__(self, label: str | Tuple[str, str]) -> Node | Tuple[Node, Node]:
@@ -54,8 +53,8 @@ class Dag:
             return lst[0]
 
     def add_arc(self, src_node: Node, dst_node: Node) -> "Dag":
-        # if self.nodes and (src_node not in self.nodes) and (dst_node not in self.nodes):
-        #     raise ValueError("One of the given nodes must be in the DAG.")
+        if self.nodes and (src_node not in self.nodes) and (dst_node not in self.nodes):
+            raise ValueError("One of the given nodes must be in the DAG.")
 
         temp_dag = Dag(arcs=[*self.arcs, (src_node, dst_node)])
         self.topological_sort(temp_dag)
@@ -64,7 +63,7 @@ class Dag:
         return self
 
     @staticmethod
-    def topological_sort(dag: "Dag") -> List[Node]:
+    def topological_sort(dag: "Dag") -> Sequence[Node]:
         sorted_nodes = deque()
         visited = []
         temp_visited = []
@@ -93,7 +92,7 @@ class Dag:
 
         return sorted_nodes
 
-    def all_dependencies(self, node: Node) -> List[Node]:
+    def all_dependencies(self, node: Node) -> Sequence[Node]:
         out_set = []
         for path in self.enumerate_paths():
             if node in path:
@@ -105,14 +104,14 @@ class Dag:
         if node not in self.nodes:
             raise ValueError("The given node does not belong to the DAG.")
 
-    def direct_dependencies(self, node: Node) -> List[Node]:
+    def direct_dependencies(self, node: Node) -> Sequence[Node]:
         return [x for x, y in self.arcs if y == node]
 
-    def neighbors(self, node: Node) -> List[Node]:
+    def neighbors(self, node: Node) -> Sequence[Node]:
         self._is_in_dag(node)
         return [y for x, y in self.arcs if x == node]
 
-    def enumerate_paths(self) -> List[Tuple]:
+    def enumerate_paths(self) -> Sequence[Sequence[Node]]:
         out_list: list[tuple[Node]] = []
 
         def dfs(node: Node, path: tuple[Node]):
@@ -133,7 +132,7 @@ class Dag:
 
         return out_list
 
-    def level(self, node: Node, path: List[Node]) -> int:
+    def level(self, node: Node, path: Sequence[Node]) -> int:
         self._is_in_dag(node)
         if node not in path:
             return -1
@@ -142,10 +141,12 @@ class Dag:
 
 def _create_null_node(prefix: str = "null-node") -> Node:
     def null_func(label, deps_dict): return None
+    trimmed_uid = str(uuid.uuid4()).replace('-', '')[:8]
     return Node(
-        label=f"{prefix}-{uuid.uuid4()}",
-        callback=null_func,
-        status=NodeStateEnum.COMPLETED
+        f"{prefix}-{trimmed_uid}",
+        null_func,
+        use_deps=False,
+        raise_error=False
     )
 
 
@@ -155,17 +156,19 @@ _NULL_NODE = _create_null_node(prefix="null-node")
 def node_registrator(dag: Dag,
                      label: str,
                      depends_on: list[str | Node] | None = None,
+                     use_deps: bool = True,
+                     raise_error: bool = False,
                      ):
     """Decorator for wrapping a custom function as a node to the given DAG."""
-
-    # Create a "Null Node" if depends_on is empty instead of requiring the user to manually create a node.
+    
     depends_on = depends_on or [_NULL_NODE]
 
     if any(not isinstance(dep, (str, Node)) for dep in depends_on):
         raise TypeError("The dependencies must be a String (label) or Node.")
 
     def outer(cb_func):
-        node = dag[label] if label in dag.node_labels else Node(label=label, callback=cb_func)
+        node = dag[label] if label in dag.node_labels \
+            else Node(label, cb_func, use_deps=use_deps, raise_error=raise_error)
 
         for dependency in depends_on:
             if isinstance(dependency, str):
@@ -190,12 +193,25 @@ class DagBuilder:
 
     def add_node(self,
                  label: str,
-                 cb_func: Callable[[str, dict[str, Result]], Any],
+                 cb_func: Callable[["Node", dict[str, Result]], Any],
                  depends_on: list[str | Node] | None = None,
+                 use_deps: bool = True,
+                 raise_error: bool = False,
+                 *cb_args,
+                 **cb_kwargs
                  ) -> "DagBuilder":
 
         depends_on = depends_on or [_NULL_NODE]
-        node = self._dag[label] if label in self._dag.node_labels else Node(label=label, callback=cb_func)
+
+        node = self._dag[label] if label in self._dag.node_labels \
+            else Node(
+                label,
+                cb_func,
+                use_deps=use_deps,
+                raise_error=raise_error,
+                *cb_args,
+                **cb_kwargs
+            )
 
         # Register the dependency arc to the DAG
         for dependency in depends_on:

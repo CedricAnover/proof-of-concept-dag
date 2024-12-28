@@ -1,7 +1,10 @@
+import time
+import tempfile
+from pathlib import Path
 from typing import Any
 
 from src.conduit import AsyncConduit
-from src.result import Result, LocalResultIO, MemoryResultIO
+from src.result import Result, MemoryResultIO, LocalResultOperations, JsonSerializer, PickleSerializer
 from src.dag import Dag
 from src.node import Node
 
@@ -19,12 +22,16 @@ def my_callback(node: Node, dep_results: dict[str, Result], message=None) -> Any
     result_data = (f"{node.label}-stdout", f"{node.label}-stderr")
     return result_data
 
+def cb_sleep(label, deps):
+    time.sleep(3)
+    return None
+
 
 if __name__ == "__main__":
     node_1 = Node("1", my_callback)
     node_2 = Node("2", my_callback, message="Hello World")
     node_3 = Node("3", my_callback)
-    node_4 = Node("4", my_callback)
+    node_4 = Node("4", cb_sleep)
     node_5 = Node("5", my_callback)
     node_6 = Node("6", my_callback, message="Some Message")
     node_7 = Node("7", fail_callback, raise_error=False)
@@ -44,7 +51,20 @@ if __name__ == "__main__":
         print(f"{src} --> {dst}")
     print()
 
-    # res_io = MemoryResultIO()
-    res_io = LocalResultIO()
-    async_conduit = AsyncConduit(dag, res_io)
-    async_conduit.start()
+
+    json_serializer = JsonSerializer()
+    pickle_serializer = PickleSerializer()
+
+    res_ops = LocalResultOperations.create_with_temp_location(json_serializer)
+    # res_io = res_ops.result_io
+    res_io = MemoryResultIO()
+
+    try:
+        res_ops.create_location()
+        async_conduit = AsyncConduit(dag, res_io, node_timeout=5)
+        async_conduit.start()
+    except Exception:
+        raise
+    finally:
+        # res_ops.transfer_results(".tmp")
+        res_ops.delete_location()
