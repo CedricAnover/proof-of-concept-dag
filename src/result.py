@@ -2,16 +2,21 @@ import os
 import shutil
 import tempfile
 import uuid
+import pickle
 from pathlib import Path
 from typing import Any, AnyStr, Type, Optional, Sequence, Protocol
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 
 
+class ResultData(BaseModel, Protocol):
+    """Base class for all result data."""
+
+
 class Result(BaseModel):
     node_label: str = Field(..., description="Node label associated with the result.")
     is_success: bool = Field(..., description="Completion state of a node (Sucess or Fail).")
-    result_data: Optional[Any] = Field(None, description="Output result of the node. Note that this should be serializable/deserializable.")
+    result_data: Optional[ResultData] = Field(None, description="Output result of the node. Note that this should be serializable/deserializable.")
     error: Optional[str] = Field(None, description="Error message if an error occurred after running a node.")
     id_: uuid.UUID = Field(default_factory=uuid.uuid4, description="A unique identifier for the result.")
 
@@ -21,9 +26,8 @@ class ISerializeDeserialize(ABC):
     def serialize(self, result: Result, *args, **kwargs) -> AnyStr:
         pass
 
-    @classmethod
     @abstractmethod
-    def deserialize(cls, result_str: AnyStr, *args, **kwargs) -> Result:
+    def deserialize(self, result_str: AnyStr, *args, **kwargs) -> Result:
         pass
 
 
@@ -62,4 +66,32 @@ class IResultOperations(ABC):
         pass
 
 #=============================================================================================
+## JSON
 
+class JsonSerializer(ISerializeDeserialize):
+    def serialize(self, result: Result, *args, **kwargs) -> str:
+        return result.model_dump_json(*args, **kwargs)
+
+    def deserialize(self, result_str: str, *args, **kwargs) -> Result:
+        return Result.model_validate_json(result_str, *args, **kwargs)
+
+#=============================================================================================
+## Pickle
+
+class PickleSerializer(ISerializeDeserialize):
+    def serialize(self, result: Result, *args, **kwargs) -> bytes:
+        return pickle.dumps(result, *args, **kwargs)
+
+    def deserialize(self, result_str: bytes, *args, **kwargs) -> Result:
+        return pickle.loads(result_str)
+
+#=============================================================================================
+## Memory ResultIO and IResultOperations
+
+
+#=============================================================================================
+## Local ResultIO and IResultOperations
+
+
+#=============================================================================================
+## TODO: Remote ResultIO and IResultOperations using SSH protocol
