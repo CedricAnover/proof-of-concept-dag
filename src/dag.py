@@ -403,6 +403,9 @@ def dag_task(dag: Dag,
             it will not use the cache invoked by the node itself.
         - For now, its best practice to use positional arguments for the function to be decorated, making
             sure that there is initial value(s) in `func_args` parameter of the dag task decorator.
+        - This decorator assumes that the function to be decorated is "idempotent". In other words,
+            performing the same action multiple times with the same arguments will always yield the same
+            outcome, without altering the final result.
 
     Example:
         @dag_task(dag, raise_error=True, func_args=(2,))
