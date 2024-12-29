@@ -56,7 +56,13 @@ def _async_timeout_func(timeout_seconds: int | None):
 
 
 def _sync_timeout_func(timeout_seconds: int | None):
-    """Synchronous timeout decorator."""
+    """
+    Synchronous timeout decorator.
+
+    Notes:
+        - There may be slight overhead with the `_sync_timeout_func` decorator due to the
+            use of threading for synchronous functions.
+    """
     def decorator(func: Callable):
         @functools.wraps(func)
         def wrapper(*args, **kwargs) -> Any:
