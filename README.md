@@ -127,7 +127,7 @@ def cb_2() -> Any:
     return ...
 
 
-@dag_task(dag, raise_error=False, func_args=(4,))  # Needs `func_args` if there are positional arguments.
+@dag_task(dag, raise_error=False, init_args=(4,))  # Needs `init_args` if there are positional arguments.
 def cb_3(arg1):
     ...
     result_cb_1 = cb_1()  # Cached
