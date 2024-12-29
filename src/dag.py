@@ -164,7 +164,7 @@ def node_registrator(dag: Dag,
                      label: str,
                      depends_on: list[str | Node] | None = None,
                      use_deps: bool = True,
-                     raise_error: bool = False,
+                     raise_error: bool = True,
                      ):
     """Decorator for wrapping a custom function as a node to the given DAG."""
 
@@ -208,7 +208,7 @@ class DagBuilder:
                  cb_func: Callable[["Node", dict[str, Result]], Any],
                  depends_on: list[str | Node] | None = None,
                  use_deps: bool = True,
-                 raise_error: bool = False,
+                 raise_error: bool = True,
                  *cb_args,
                  **cb_kwargs
                  ) -> "DagBuilder":

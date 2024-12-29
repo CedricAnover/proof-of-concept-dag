@@ -17,7 +17,7 @@ class Node:
                  label: str,
                  callback: Callable[["Node", Dict[str, Result]], Any],
                  use_deps: bool = True,
-                 raise_error: bool = False,
+                 raise_error: bool = True,
                  *cb_args,
                  **cb_kwargs
                  ) -> None:
