@@ -7,7 +7,7 @@ from collections import deque
 from typing import Sequence, Tuple, Callable, Any, List, Dict
 
 from .result import Result
-from .node import Node
+from .node import Node, NodeError
 from ._logger import create_logger
 
 
@@ -343,10 +343,35 @@ def _get_called_function_invocations(func: Callable) -> List[dict]:
     return visitor.invocations
 
 
+def _retry_func(max_retries: int | None):
+    # Note: If other functions depend on this failed function and
+    # `raise_error=True`, then the error will propagate.
+    def outer(func):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            if not max_retries:
+                return func(*args, **kwargs)
+            assert isinstance(max_retries, int) and max_retries >= 1
+            attempt = 0
+            while attempt < max_retries:
+                try:
+                    return func(*args, **kwargs)
+                except Exception as err:
+                    attempt += 1
+                    if attempt < max_retries:
+                        logger.warning(f"Retrying. Current attempt {attempt} out of {max_retries}.")
+                    else:
+                        logger.error("All attempts failed.")
+                        raise NodeError(err)
+        return wrapper
+    return outer
+
+
 def dag_task(dag: Dag,
              lru_maxsize: int = None,
              typed: bool = False,
              raise_error=True,
+             max_retries: int | None = None,
              init_args: tuple = ()
              ):
     """
@@ -430,6 +455,7 @@ def dag_task(dag: Dag,
 
         # Create the Wrapper
         @functools.lru_cache(maxsize=lru_maxsize, typed=typed)
+        @_retry_func(max_retries)  # Retry calling the function if there are errors `max_retries` times.
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             result_data = func(*args, **kwargs)
