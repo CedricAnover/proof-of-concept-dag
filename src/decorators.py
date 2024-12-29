@@ -1,7 +1,7 @@
 import functools
 import asyncio
 import threading
-from typing import Any
+from typing import Any, Callable
 
 from ._logger import create_logger
 from .node import NodeError
@@ -34,11 +34,13 @@ def _retry_func(max_retries: int | None):
     return outer
 
 
-def _timeout_func(timeout_seconds: int | None):
-    def decorator(func):
+def _async_timeout_func(timeout_seconds: int | None):
+    """Asynchronous timeout decorator."""
+    def decorator(func: Callable):
         @functools.wraps(func)
-        async def async_wrapper(*args, **kwargs) -> Any:
-            if not timeout_seconds: return func(*args, **kwargs)
+        async def wrapper(*args, **kwargs) -> Any:
+            if not timeout_seconds:
+                return await func(*args, **kwargs)
 
             try:
                 return await asyncio.wait_for(func(*args, **kwargs), timeout_seconds)
@@ -49,9 +51,17 @@ def _timeout_func(timeout_seconds: int | None):
             except Exception as e:
                 logger.error(f"Exception in function {func.__name__}: {e}")
                 raise NodeError(e)
+        return wrapper
+    return decorator
 
-        def sync_wrapper(*args, **kwargs) -> Any:
-            if not timeout_seconds: return func(*args, **kwargs)
+
+def _sync_timeout_func(timeout_seconds: int | None):
+    """Synchronous timeout decorator."""
+    def decorator(func: Callable):
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs) -> Any:
+            if not timeout_seconds:
+                return func(*args, **kwargs)
 
             result = []
 
@@ -77,11 +87,15 @@ def _timeout_func(timeout_seconds: int | None):
                 logger.error(result[0])
                 raise NodeError(result[0])
             return result[0]
+        return wrapper
+    return decorator
 
-        # Determine if the function is asynchronous or synchronous
+
+def _timeout_func(timeout_seconds: int | None):
+    """General timeout decorator that selects between sync and async."""
+    def decorator(func: Callable):
         if asyncio.iscoroutinefunction(func):
-            return async_wrapper
+            return _async_timeout_func(timeout_seconds)(func)
         else:
-            return sync_wrapper
-
+            return _sync_timeout_func(timeout_seconds)(func)
     return decorator

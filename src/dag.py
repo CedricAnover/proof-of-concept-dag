@@ -334,9 +334,9 @@ def dag_task(dag: Dag,
             raise ValueError("The function to be decorated must not have any keyword arguments.")
 
         # Create the Wrapper
+        @functools.lru_cache(maxsize=lru_maxsize, typed=typed)
         @_timeout_func(timeout_seconds)
         @_retry_func(max_retries)  # Retry calling the function if there are errors `max_retries` times.
-        @functools.lru_cache(maxsize=lru_maxsize, typed=typed)
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
             result_data = func(*args, **kwargs)
