@@ -4,7 +4,7 @@ import threading
 from typing import Any, Callable
 
 from ._logger import create_logger
-from .node import NodeError
+from .exceptions import NodeError
 
 
 logger = create_logger(__name__)

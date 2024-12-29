@@ -1,15 +1,12 @@
 from typing import Callable, Dict
 
+from .exceptions import NodeError
 from .enums import NodeStateEnum
 from .result import *
 from ._logger import create_logger
 
 
 logger = create_logger(__name__)
-
-
-class NodeError(Exception):
-    pass
 
 
 class Node:

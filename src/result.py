@@ -8,24 +8,7 @@ from typing import Any, Optional, Dict, Protocol, Union
 from abc import ABC, abstractmethod
 from pydantic import BaseModel, Field
 
-
-class ResultError(Exception):
-    """Base class of all result related errors."""
-
-
-class ResultIOError(ResultError):
-    """Raised when there is an I/O error related to result processing."""
-    pass
-
-
-class ResultNotFoundError(ResultIOError):
-    """Raised when a result for a specific node label is not found."""
-    pass
-
-
-class ResultDataError(ResultError):
-    """Raised when there is an issue with the result data."""
-    pass
+from .exceptions import ResultDataError, ResultIOError, ResultNotFoundError
 
 
 class Result(BaseModel):
