@@ -103,6 +103,15 @@ Uses an LRU cache (memory) to temporarily store the results of the default invoc
 
 The implementation of `dag_task` uses the `node_registrator` decorator to automatically create nodes and register them to the DAG. Since it utilizes an LRU Cache, it passes `use_deps=False` to `node_registrator` to eliminate the overhead of reading the results of its dependencies. However, it will still write the results to disk (assuming that `LocalResultIO` or a remote analogue is used). Because it uses a memory-based LRU Cache, it is best practice to avoid using `MemoryResultIO` from the _result_ module. This prevents _writing_ to memory, which would otherwise introduce additional overhead.
 
+**Caveats and Limitations:**
+
+- Inputs/Arguments must be Hashable/Immutable (LRU Caching).
+    - Find better designs and generalize, then parameterized the caching technique (strategy pattern?).
+    - Implement custom caching tools or add external dependencies for caching the results.
+- Outputs/Results must be JSON or Pickle Serializable/Deserializable.
+    - This can be improved in `result` module (e.g. extensions with different formats). No modifications!!!
+    - Use `MemoryResultIO` so it _writes_ to memory and not disk, but with additional memory overhead.
+
 
 **Example:**
 
