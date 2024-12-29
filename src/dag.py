@@ -402,13 +402,13 @@ def dag_task(dag: Dag,
         - If the function has keyword arguments, event if another task invoked it with same argument,
             it will not use the cache invoked by the node itself.
         - For now, its best practice to use positional arguments for the function to be decorated, making
-            sure that there is initial value(s) in `func_args` parameter of the dag task decorator.
+            sure that there is initial value(s) in `init_args` parameter of the dag task decorator.
         - This decorator assumes that the function to be decorated is "idempotent". In other words,
             performing the same action multiple times with the same arguments will always yield the same
             outcome, without altering the final result.
 
     Example:
-        @dag_task(dag, raise_error=True, func_args=(2,))
+        @dag_task(dag, raise_error=True, init_args=(2,))
         def task1(arg1):
             ...
             return ...
@@ -422,7 +422,7 @@ def dag_task(dag: Dag,
             return ...
 
     Raises:
-        ValueError: If `func_args` is an empty tuple and the function to be decorated has positional arguments.
+        ValueError: If `init_args` is an empty tuple and the function to be decorated has positional arguments.
     """
 
     def outer(func: Callable[[Any], Any]):
@@ -442,9 +442,9 @@ def dag_task(dag: Dag,
         func_kwargs = {param: value.default for param, value in parameters.items() if value.default != inspect.Parameter.empty}
 
         # Throw an error if the function to be decorated has required positional arguments
-        # and `dag_task` parameter `func_args` is empty.
+        # and `dag_task` parameter `init_args` is empty.
         if _func_args and not init_args:
-            err_msg = "`func_args` tuple must be given if the function to be decorated has positional arguments."
+            err_msg = "`init_args` tuple must be given if the function to be decorated has positional arguments."
             logger.error(err_msg)
             raise ValueError(err_msg)
 
