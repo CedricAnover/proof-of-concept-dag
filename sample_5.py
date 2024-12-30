@@ -50,7 +50,6 @@ if __name__ == "__main__":
         return res
 
     @dag_tasker.task()
-    @dag_tasker.timeout(4)
     def cb_1() -> Any:
         global COUNTER_1
         COUNTER_1 += 1
@@ -63,7 +62,6 @@ if __name__ == "__main__":
         return 100
 
     @dag_tasker.task()
-    @dag_tasker.timeout(4)
     def cb_2() -> Any:
         global COUNTER_2
         COUNTER_2 += 1

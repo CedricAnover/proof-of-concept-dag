@@ -455,20 +455,6 @@ class TestDagTaskerWithConduit_ErrorHandling(unittest.TestCase):
         with self.assertRaises(NodeError):
             self.conduit.start()
 
-    def test_timeout_decorator(self):
-        @self.dag_tasker.task()
-        @self.dag_tasker.timeout(1)  # Timeout is 1 seconds
-        def task1():
-            time.sleep(2)  # Simulate with 2 seconds sleep
-            return "task1-result"
-
-        @self.dag_tasker.task()
-        def task2():
-            return "task2-result"
-
-        with self.assertRaises(NodeError):
-            self.conduit.start()
-
     def test_retry_decorator(self):
         counter = 0
 

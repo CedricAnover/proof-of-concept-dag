@@ -459,37 +459,6 @@ class DagTasker:
             return wrapper
         return outer
 
-    def timeout(self, timeout_seconds: float | int) -> Callable:
-        assert isinstance(timeout_seconds, (float, int)) and timeout_seconds > 0, \
-            "`timeout_seconds` must be a positive number."
-
-        def decorator(func: Callable):
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs) -> Any:
-                result = []
-
-                def target():
-                    try:
-                        result.append(func(*args, **kwargs))
-                    except Exception as e:
-                        result.append(e)
-
-                thread = threading.Thread(target=target, daemon=True)
-                thread.start()
-                thread.join(timeout_seconds)
-
-                if thread.is_alive():
-                    thread._stop()  # Forcefully stop the thread
-                    err_msg = f"Function '{func.__name__}' timed out after {timeout_seconds} seconds"
-                    raise NodeError(err_msg)
-
-                if isinstance(result[0], Exception):
-                    # Re-raise the exception if the function raised one
-                    raise NodeError(result[0])
-                return result[0]
-            return wrapper
-        return decorator
-
     def log_result(self, func: Callable) -> Callable:
         @functools.wraps(func)
         def wrapper(*args, **kwargs):
