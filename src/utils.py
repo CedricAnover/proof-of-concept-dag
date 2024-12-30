@@ -50,10 +50,20 @@ def _get_called_function_objects(func: Callable) -> List[Callable]:
     resolved_functions = []
     func_globals = func.__globals__
 
+    func_closure = (
+        {cell.cell_contents.__name__: cell.cell_contents for cell in func.__closure__ 
+         if hasattr(cell.cell_contents, "__name__")}
+        if func.__closure__ is not None
+        else {}
+    )
+
     for func_name in visitor.called_functions:
-        # Ensure the function name is in the global scope and is callable
+        # Check in globals
         if func_name in func_globals and callable(func_globals[func_name]):
             resolved_functions.append(func_globals[func_name])
+        # Check in closure
+        elif func_name in func_closure and callable(func_closure[func_name]):
+            resolved_functions.append(func_closure[func_name])
 
     return resolved_functions
 

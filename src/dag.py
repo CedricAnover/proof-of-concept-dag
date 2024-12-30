@@ -1,8 +1,9 @@
 import inspect
 import functools
 import uuid
+import threading
 from collections import deque
-from typing import Sequence, Tuple, Callable, Any
+from typing import Sequence, Tuple, Callable, Any, List, Dict, Hashable
 
 from .utils import (
     _remove_duplicates,
@@ -12,6 +13,7 @@ from .decorators import (
     _retry_func,
     _timeout_func,
 )
+from .exceptions import NodeError
 from .result import Result
 from .node import Node
 from ._logger import create_logger
@@ -170,6 +172,10 @@ def node_registrator(dag: Dag,
 
     if any(not isinstance(dep, (str, Node)) for dep in depends_on):
         raise TypeError("The dependencies must be a String (label) or Node.")
+
+    # Check if label already used by a node in dag
+    if label in dag.node_labels:
+        raise ValueError("The label is already used.")
 
     def outer(cb_func):
         node = dag[label] if label in dag.node_labels \
@@ -356,3 +362,153 @@ def dag_task(dag: Dag,
 
         return wrapper
     return outer
+
+
+class DagTasker:
+    # Class as Decorator for any functions to be decorated as task.
+    # This is a stateful alternative to `dag_task`.
+
+    ATTR_NODE_LABEL = "node_label"
+
+    def __init__(self):
+        self._dag = Dag()
+
+        # Naive alternative to LRU Caching. Functions to be decorated
+        # would have `results_dict` attached to them as attribute.
+        self._results_dict: Dict[str, Result] = dict()
+
+    def _get_node_dependencies(self, func: Callable) -> List[Node]:
+        """
+        Gets all the function calls in the given function
+        and extract all node dependencies.
+        """
+        dep_node_labels = [fn.node_label for fn in _get_called_function_objects(func) if hasattr(fn, self.ATTR_NODE_LABEL)]
+        dep_node_labels = _remove_duplicates(dep_node_labels)
+        return [dep_node for dep_node in self._dag.nodes if dep_node.label in dep_node_labels]
+
+    def _get_func_kwargs(self, func: Callable) -> Dict[Hashable, Any]:
+        """Returns the keyword arguments of a function."""
+        signature = inspect.signature(func)
+        parameters = signature.parameters
+        return {param: value.default for param, value in parameters.items() if value.default != inspect.Parameter.empty}
+
+    @property
+    def results(self) -> Dict[str, Result]:
+        return self._results_dict
+
+    def task(self,
+             f_args=(),
+             raise_error=True,
+             lru_maxsize: int = None,
+             typed: bool = False,
+             ) -> Callable:
+
+        def outer(func: Callable):
+            # Throw error if function has keyword arguments (unhashable)
+            f_kw = self._get_func_kwargs(func)
+            if f_kw:
+                raise ValueError("The function must not have any unhashable keyword arguments.")
+
+            # Use the function's name as the node label. No prefix and suffix.
+            node_label_ = func.__name__
+
+            # Mark the function with the associated node label
+            setattr(func, self.ATTR_NODE_LABEL, node_label_)
+
+            # Get all the function call in `func` and extract all node dependencies
+            dep_nodes = self._get_node_dependencies(func)
+
+            # Create a wrapper for func
+            @functools.lru_cache(maxsize=lru_maxsize, typed=typed)
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                result = func(*args, **kwargs)
+                return result
+
+            # Create a Temporary Node Callback Function and use
+            # `node_registrator` to add this to the dag as node.
+            @node_registrator(
+                self._dag,
+                node_label_,
+                depends_on=dep_nodes,
+                use_deps=False,
+                raise_error=raise_error,
+            )
+            def cb_func(node, deps):
+                return wrapper(*f_args, **f_kw)
+            return wrapper
+        return outer
+
+    def retry(self, max_retries: int | None = None) -> Callable:
+        def outer(func: Callable):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs) -> Any:
+                if not max_retries:
+                    return func(*args, **kwargs)
+                assert isinstance(max_retries, int) and max_retries >= 1
+                attempt = 0
+                while attempt < max_retries:
+                    try:
+                        return func(*args, **kwargs)
+                    except Exception as err:
+                        attempt += 1
+                        if attempt < max_retries:
+                            logger.warning(f"Retrying. Current attempt {attempt} out of {max_retries}.")
+                        else:
+                            logger.error("All attempts failed.")
+                            raise NodeError(err)
+            return wrapper
+        return outer
+
+    def timeout(self, timeout_seconds: int | None  = None) -> Callable:
+        def decorator(func: Callable):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs) -> Any:
+                if not timeout_seconds:
+                    return func(*args, **kwargs)
+
+                result = []
+
+                def target():
+                    try:
+                        result.append(func(*args, **kwargs))
+                    except Exception as e:
+                        result.append(e)
+
+                thread = threading.Thread(target=target, daemon=True)
+                thread.start()
+                thread.join(timeout_seconds)
+
+                if thread.is_alive():
+                    thread._stop()  # Forcefully stop the thread
+                    err_msg = f"Function '{func.__name__}' timed out after {timeout_seconds} seconds"
+                    raise NodeError(err_msg)
+
+                if isinstance(result[0], Exception):
+                    # Re-raise the exception if the function raised one
+                    raise NodeError(result[0])
+                return result[0]
+            return wrapper
+        return decorator
+
+    def log_result(self, func: Callable) -> Callable:
+        @functools.wraps(func)
+        def wrapper(*args, **kwargs):
+            result_data = func(*args, **kwargs)
+            logger.info(f"Result of {func.__name__}: {result_data}")
+            return result_data
+        return wrapper
+
+    def start(self, conduit, *start_args, **start_kwargs) -> None:
+        try:
+            # Start the Conduit
+            conduit.start(*start_args, **start_kwargs)
+
+            # Collect Result
+            for label in self._dag.node_labels:
+                # Exclude Null Node
+                if not label.startswith("null-node"):
+                    self._results_dict[label] = conduit.result_io.read_result(label)
+        except Exception as err:
+            logger.error(err)
+            raise

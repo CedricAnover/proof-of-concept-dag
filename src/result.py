@@ -213,10 +213,16 @@ class JsonSerializer(ISerializeDeserialize):
         return "json"
 
     def serialize(self, result: Result, *args, **kwargs) -> str:
-        return result.model_dump_json(*args, **kwargs)
+        try:
+            return result.model_dump_json(*args, **kwargs)
+        except Exception as err:
+            raise ResultDataError(err)
 
     def deserialize(self, data: str, *args, **kwargs) -> Result:
-        return Result.model_validate_json(data, *args, **kwargs)
+        try:
+            return Result.model_validate_json(data, *args, **kwargs)
+        except Exception as err:
+            raise ResultDataError(err)
 
 
 class PickleSerializer(ISerializeDeserialize):
@@ -226,7 +232,13 @@ class PickleSerializer(ISerializeDeserialize):
         return "pkl"
 
     def serialize(self, result: Result) -> bytes:
-        return pickle.dumps(result)
+        try:
+            return pickle.dumps(result)
+        except Exception as err:
+            raise ResultDataError(err)
 
     def deserialize(self, data: bytes) -> Result:
-        return pickle.loads(data)
+        try:
+            return pickle.loads(data)
+        except Exception as err:
+            raise ResultDataError(err)

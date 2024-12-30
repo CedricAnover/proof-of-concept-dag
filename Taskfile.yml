@@ -54,5 +54,5 @@ tasks:
     deps: [sample-1, sample-2, sample-3, sample-4, sample-5]
     cmds:
       - echo "Taskfile Parallel Done!!!"
-      - task: clean
+      - task: clean-samples
 #==============================================================================
