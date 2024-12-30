@@ -27,7 +27,6 @@ class TestDagTasker(unittest.TestCase):
     def test_instantiation(self):
         self.assertIsInstance(self.dag_tasker, DagTasker)
         self.assertIsInstance(self.dag_tasker._dag, Dag)
-        self.assertEqual(len(self.dag_tasker.results), 0)
         self.assertEqual(self.dag_tasker.ATTR_NODE_LABEL, "node_label")
 
     def test_add_task_without_dependencies(self):
@@ -262,7 +261,12 @@ class TestDagTaskerWithConduit(unittest.TestCase):
             self.counter["task7"] += 1
             return [task2(), *task6()]
 
+        pickle_serializer = PickleSerializer()
+        self.res_ops = LocalResultOperations.create_with_temp_location(pickle_serializer)
+        self.res_io = self.res_ops.result_io
+        self.conduit = AsyncConduit(self.dag_tasker._dag, self.res_io)
         self._start_conduit()
+        
         self.addCleanup(self.cleanup)
 
     def cleanup(self):
@@ -272,12 +276,7 @@ class TestDagTaskerWithConduit(unittest.TestCase):
             _logger.error(err)
 
     def _start_conduit(self):
-        json_serializer = JsonSerializer()
-        pickle_serializer = PickleSerializer()
-        self.res_ops = LocalResultOperations.create_with_temp_location(pickle_serializer)
-        self.res_io = self.res_ops.result_io
-        self.conduit = AsyncConduit(self.dag_tasker._dag, self.res_io)
-        self.dag_tasker.start(self.conduit)
+        self.conduit.start()
 
     def test_dependency_call_counts(self):
         self.assertEqual(self.counter["task1"], 1)
@@ -289,11 +288,11 @@ class TestDagTaskerWithConduit(unittest.TestCase):
         self.assertEqual(self.counter["task7"], 1)
 
     def test_dag_tasker_results(self):
-        results = self.dag_tasker.results
+        dag = self.dag_tasker._dag
+        results = {label: self.res_io.read_result(label) for label in dag.node_labels}
+
         self.assertIsInstance(results, dict)
-
-        self.assertEqual(len(results), 7)
-
+        self.assertEqual(len(results), 8)  # Because it include the Null Node
         self.assertEqual(results["task1"].result_data, "task1-result")
         self.assertEqual(results["task2"].result_data, "task2-result")
         self.assertEqual(results["task3"].result_data, ["task1-result", "task2-result"])
@@ -394,9 +393,10 @@ class TestDagTaskerWithConduit_TrivialAndNonTrivialScenarios(unittest.TestCase):
         self.res_ops = LocalResultOperations.create_with_temp_location(pickle_serializer)
         self.res_io = self.res_ops.result_io
         self.conduit = AsyncConduit(self.dag_tasker._dag, self.res_io)
-        self.dag_tasker.start(self.conduit)
-
-        results = self.dag_tasker.results
+        self.conduit.start()
+        
+        dag = self.dag_tasker._dag
+        results = {label: self.res_io.read_result(label) for label in dag.node_labels}
 
         for _, count in counter.items():
             self.assertEqual(count, 1)

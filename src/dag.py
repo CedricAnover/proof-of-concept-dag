@@ -371,8 +371,9 @@ class DagTasker:
     def __init__(self):
         self._dag = Dag()
 
-        # Storing Results after running a Conduit
-        self._results_dict: Dict[str, Result] = dict()
+    @property
+    def dag(self) -> Dag:
+        return self._dag
 
     def _get_node_dependencies(self, func: Callable) -> List[Node]:
         """
@@ -388,10 +389,6 @@ class DagTasker:
         signature = inspect.signature(func)
         parameters = signature.parameters
         return {param: value.default for param, value in parameters.items() if value.default != inspect.Parameter.empty}
-
-    @property
-    def results(self) -> Dict[str, Result]:
-        return self._results_dict
 
     def task(self,
              *f_args,
@@ -473,17 +470,3 @@ class DagTasker:
             logger.info(f"Result of {func.__name__}: {result_data}")
             return result_data
         return wrapper
-
-    def start(self, conduit, *start_args, **start_kwargs) -> None:
-        try:
-            # Start the Conduit
-            conduit.start(*start_args, **start_kwargs)
-
-            # Collect Result
-            for label in self._dag.node_labels:
-                # Exclude Null Node
-                if not label.startswith("null-node"):
-                    self._results_dict[label] = conduit.result_io.read_result(label)
-        except Exception as err:
-            logger.error(err)
-            raise
