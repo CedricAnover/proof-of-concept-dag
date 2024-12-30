@@ -394,7 +394,7 @@ class DagTasker:
         return self._results_dict
 
     def task(self,
-             f_args=(),
+             *f_args,
              raise_error=True,
              lru_maxsize: int = None,
              typed: bool = False,
@@ -418,8 +418,8 @@ class DagTasker:
             # Create a wrapper for func
             @functools.lru_cache(maxsize=lru_maxsize, typed=typed)
             @functools.wraps(func)
-            def wrapper(*args, **kwargs):
-                result = func(*args, **kwargs)
+            def wrapper(*args):
+                result = func(*args)
                 return result
 
             # Create a Temporary Node Callback Function and use
@@ -432,11 +432,18 @@ class DagTasker:
                 raise_error=raise_error,
             )
             def cb_func(node, deps):
-                return wrapper(*f_args, **f_kw)
+                return wrapper(*f_args)
             return wrapper
         return outer
 
     def retry(self, max_retries: int, sleep_for: float = 1) -> Callable:
+        # Warn: This must be put on bottom of the `task` decorator
+        # Example:
+        # @self.dag_tasker.task()
+        # @self.dag_tasker.retry(3, sleep_for=1)
+        # def some_function():
+        #     ...
+
         assert isinstance(max_retries, int) and max_retries > 0, \
             "`max_retries` must be a positive integer."
 

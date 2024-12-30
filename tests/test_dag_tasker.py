@@ -185,9 +185,7 @@ class TestDagTasker(unittest.TestCase):
         self.assertEqual(self.call_counter, 1)
 
     def test_dependency_calls_with_arguments(self):
-        @self.dag_tasker.task(
-            f_args=("task1-arg",)
-        )
+        @self.dag_tasker.task("task1-arg")
         def task1(value):
             self.call_counter += 1  # Track the number of calls
             return value
@@ -238,9 +236,7 @@ class TestDagTaskerWithConduit(unittest.TestCase):
             self.counter["task2"] += 1
             return "task2-result"
 
-        @self.dag_tasker.task(
-            f_args=(True,)
-        )
+        @self.dag_tasker.task(True)
         def task3(value):
             self.counter["task3"] += 1
             # return "task3-result"
@@ -332,9 +328,7 @@ class TestDagTaskerWithConduit_TrivialAndNonTrivialScenarios(unittest.TestCase):
         counter_1 = 0
         counter_2 = 0
 
-        @self.dag_tasker.task(
-            f_args=("Hello World",)
-        )
+        @self.dag_tasker.task("Hello World")
         def task1(arg1):
             nonlocal counter_1
             counter_1 += 1
@@ -488,15 +482,11 @@ class TestDagTaskerWithConduit_ErrorHandling(unittest.TestCase):
             self.conduit.start()
 
     def test_unhashable_arguments(self):
-        @self.dag_tasker.task(
-            f_args=([1, 2],)  # Mutable List
-        )
+        @self.dag_tasker.task([1, 2])  # Mutable List
         def task1(arg1):
             return "task1-result"
 
-        @self.dag_tasker.task(
-            f_args=({"key": "value"},)  # Mutable Dictionary
-        )
+        @self.dag_tasker.task({"key": "value"})  # Mutable Dictionary
         def task2(arg2):
             return "task2-result"
 
@@ -507,9 +497,7 @@ class TestDagTaskerWithConduit_ErrorHandling(unittest.TestCase):
         # Examples of non pickle serializable
         # Generators, Lambdas, objects with weak references, etc.
 
-        @self.dag_tasker.task(
-            f_args=((1, 2, 3),)
-        )
+        @self.dag_tasker.task((1, 2, 3))
         def task1(tup):
             return filter(lambda x: x % 2 != 0, tup)
 

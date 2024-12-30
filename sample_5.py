@@ -38,7 +38,7 @@ order_of_evaluation = []
 if __name__ == "__main__":
     dag_tasker = DagTasker()
 
-    @dag_tasker.task(f_args=("https://en.wikipedia.org/wiki/Mathematics",))
+    @dag_tasker.task("https://en.wikipedia.org/wiki/Mathematics")
     @dag_tasker.retry(4)
     def http_request(url):
         res = len(web_request(url))
@@ -79,7 +79,7 @@ if __name__ == "__main__":
         order_of_evaluation.append(cb_2.__name__)
         return res
 
-    @dag_tasker.task(f_args=(4,))
+    @dag_tasker.task(4)
     def cb_3(arg1):
         global COUNTER_3
         COUNTER_3 += 1
