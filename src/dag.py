@@ -2,6 +2,7 @@ import inspect
 import functools
 import uuid
 import threading
+import time
 from collections import deque
 from typing import Sequence, Tuple, Callable, Any, List, Dict, Hashable
 
@@ -435,7 +436,7 @@ class DagTasker:
             return wrapper
         return outer
 
-    def retry(self, max_retries: int) -> Callable:
+    def retry(self, max_retries: int, sleep_for: float = 1) -> Callable:
         assert isinstance(max_retries, int) and max_retries > 0, \
             "`max_retries` must be a positive integer."
 
@@ -451,6 +452,7 @@ class DagTasker:
                         attempt += 1
                         if attempt < max_retries:
                             logger.warning(f"Retrying. Current attempt {attempt} out of {max_retries}.")
+                            time.sleep(sleep_for)
                         else:
                             logger.error("All attempts failed.")
                             raise NodeError(err)
