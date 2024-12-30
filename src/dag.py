@@ -435,12 +435,13 @@ class DagTasker:
             return wrapper
         return outer
 
-    def retry(self, max_retries: int | None = None) -> Callable:
+    def retry(self, max_retries: int) -> Callable:
+        assert isinstance(max_retries, int) and max_retries > 0, \
+            "`max_retries` must be a positive integer."
+
         def outer(func: Callable):
             @functools.wraps(func)
             def wrapper(*args, **kwargs) -> Any:
-                if not max_retries:
-                    return func(*args, **kwargs)
                 assert isinstance(max_retries, int) and max_retries >= 1
                 attempt = 0
                 while attempt < max_retries:
@@ -456,13 +457,13 @@ class DagTasker:
             return wrapper
         return outer
 
-    def timeout(self, timeout_seconds: int | None  = None) -> Callable:
+    def timeout(self, timeout_seconds: float | int) -> Callable:
+        assert isinstance(timeout_seconds, (float, int)) and timeout_seconds > 0, \
+            "`timeout_seconds` must be a positive number."
+
         def decorator(func: Callable):
             @functools.wraps(func)
             def wrapper(*args, **kwargs) -> Any:
-                if not timeout_seconds:
-                    return func(*args, **kwargs)
-
                 result = []
 
                 def target():

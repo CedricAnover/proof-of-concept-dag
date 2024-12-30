@@ -457,7 +457,7 @@ class TestDagTaskerWithConduit_ErrorHandling(unittest.TestCase):
 
     def test_timeout_decorator(self):
         @self.dag_tasker.task()
-        @self.dag_tasker.timeout(timeout_seconds=1)  # Timeout is 1 seconds
+        @self.dag_tasker.timeout(1)  # Timeout is 1 seconds
         def task1():
             time.sleep(2)  # Simulate with 2 seconds sleep
             return "task1-result"
@@ -473,7 +473,7 @@ class TestDagTaskerWithConduit_ErrorHandling(unittest.TestCase):
         counter = 0
 
         @self.dag_tasker.task()
-        @self.dag_tasker.retry(max_retries=3)
+        @self.dag_tasker.retry(3)
         def task1():
             nonlocal counter
             counter += 1
