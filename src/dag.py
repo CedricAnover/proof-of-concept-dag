@@ -365,16 +365,12 @@ def dag_task(dag: Dag,
 
 
 class DagTasker:
-    # Class as Decorator for any functions to be decorated as task.
-    # This is a stateful alternative to `dag_task`.
-
     ATTR_NODE_LABEL = "node_label"
 
     def __init__(self):
         self._dag = Dag()
 
-        # Naive alternative to LRU Caching. Functions to be decorated
-        # would have `results_dict` attached to them as attribute.
+        # Storing Results after running a Conduit
         self._results_dict: Dict[str, Result] = dict()
 
     def _get_node_dependencies(self, func: Callable) -> List[Node]:
