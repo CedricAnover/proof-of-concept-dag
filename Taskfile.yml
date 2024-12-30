@@ -2,18 +2,34 @@ version: '3'
 
 silent: true
 
+###############################################################################
 tasks:
   default:
     cmds:
       - task: clean
       - task: run-samples-parallel
-
+#==============================================================================
+  test:
+    cmds:
+      - python -m unittest discover -s tests -p 'test_*.py'
+#==============================================================================
   clean:
+    cmds:
+      - task: clean-samples
+      - task: clean-py
+
+  clean-samples:
     cmds:
       - rm -rf /tmp/dag*
       - rm -rf /tmp/node*
       - rm -rf ./.tmp
 
+  clean-py:
+    cmds:
+      - find . -type d -name "__pycache__" -exec rm -rf {} +
+      - find . -type d -name "*.pytest_cache" -exec rm -rf {} +
+      - find . -type f -name "*.pyc" -delete
+#==============================================================================
   sample-1:
     cmds:
       - python -B sample_1.py
@@ -39,3 +55,4 @@ tasks:
     cmds:
       - echo "Taskfile Parallel Done!!!"
       - task: clean
+#==============================================================================
