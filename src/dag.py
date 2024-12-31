@@ -211,10 +211,10 @@ class DagBuilder:
     def add_node(self,
                  label: str,
                  cb_func: Callable[["Node", dict[str, Result]], Any],
+                 *cb_args,
                  depends_on: list[str | Node] | None = None,
                  use_deps: bool = True,
                  raise_error: bool = True,
-                 *cb_args,
                  **cb_kwargs
                  ) -> "DagBuilder":
 
@@ -368,8 +368,17 @@ def dag_task(dag: Dag,
 class DagTasker:
     ATTR_NODE_LABEL = "node_label"
 
-    def __init__(self):
+    def __init__(self,
+                 log_results: bool = False,
+                 pre_hooks: List[Tuple[Callable, tuple, dict]] | None = None,
+                 post_hooks: List[Tuple[Callable, tuple, dict]] | None = None,
+                 ):
         self._dag = Dag()
+
+        self._pre_hooks = pre_hooks or []
+        self._post_hooks = post_hooks or []
+
+        self._log_results = log_results
 
     @property
     def dag(self) -> Dag:
@@ -429,7 +438,15 @@ class DagTasker:
                 raise_error=raise_error,
             )
             def cb_func(node, deps):
-                return wrapper(*f_args)
+                self._run_pre_hooks()  # Run Pre-Hooks
+                result_data = wrapper(*f_args)
+                self._run_post_hooks()  # Run Post-Hooks
+
+                # Log the result if enabled
+                if self._log_results:
+                    self._log_result(wrapper, result_data)
+
+                return result_data
             return wrapper
         return outer
 
@@ -463,10 +480,13 @@ class DagTasker:
             return wrapper
         return outer
 
-    def log_result(self, func: Callable) -> Callable:
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            result_data = func(*args, **kwargs)
-            logger.info(f"Result of {func.__name__}: {result_data}")
-            return result_data
-        return wrapper
+    def _log_result(self, func, result) -> None:
+        logger.info(f"Result of {func.__name__}: {result}")
+
+    def _run_pre_hooks(self):
+        for h, args, kwargs in self._pre_hooks:
+            h(*args, **kwargs)
+
+    def _run_post_hooks(self):
+        for h, args, kwargs in self._post_hooks:
+            h(*args, **kwargs)

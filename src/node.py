@@ -13,9 +13,9 @@ class Node:
     def __init__(self,
                  label: str,
                  callback: Callable[["Node", Dict[str, Result]], Any],
+                 *cb_args,
                  use_deps: bool = True,
                  raise_error: bool = True,
-                 *cb_args,
                  **cb_kwargs
                  ) -> None:
         self.label = label
