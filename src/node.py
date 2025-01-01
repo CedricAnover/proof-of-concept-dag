@@ -268,3 +268,43 @@ class MultiRunnerNodeDispatcher(NodeDispatcher):
         node_data = self[node.label]
         _, args, kwargs, node_runner = node_data
         node_runner.start(node, *args, **kwargs)
+
+
+class NodeDispatcherWrapper:
+    """Wrapper to extend NodeDispatcher's __call__ with override functionality."""
+
+    def __init__(self, dispatcher: NodeDispatcher):
+        """
+        Initialize the wrapper with a NodeDispatcher instance.
+
+        Args:
+            dispatcher (NodeDispatcher): The dispatcher instance to wrap.
+        """
+        self._dispatcher = dispatcher
+
+    def __getattr__(self, name):
+        """Delegate attribute access to the wrapped dispatcher."""
+        return getattr(self._dispatcher, name)
+
+    def __call__(self, node_label: str, *override_args, **override_kwargs):
+        """
+        Override the __call__ method to allow overriding args and kwargs.
+
+        Args:
+            node_label (str): The label of the node to call.
+            *override_args: Positional arguments to override.
+            **override_kwargs: Keyword arguments to override.
+        """
+        node_data = self._dispatcher[node_label]
+        if len(node_data) == 3:
+            node, args, kwargs = node_data
+            # Override args and kwargs if provided
+            args = override_args if override_args else args
+            kwargs = {**kwargs, **override_kwargs}
+            self._dispatcher._start_node_runner(node, args, kwargs)
+        else:
+            node, args, kwargs, node_runner = node_data
+            # Override args and kwargs if provided
+            args = override_args if override_args else args
+            kwargs = {**kwargs, **override_kwargs}
+            node_runner.start(node, *args, **kwargs)
