@@ -183,6 +183,7 @@ class DagTasker:
              depends_on: List[str | Node] | None = None,
              raise_error: bool = True,
              get_deps: bool = False,
+             **f_kwgs,
              ):
         depends_on = depends_on or [self._null_node]
         if any(not isinstance(dep, (str, Node)) for dep in depends_on):
@@ -200,9 +201,6 @@ class DagTasker:
             def wrapper(*args, **kwargs):
                 result_data = func(*args, **kwargs)
                 return result_data
-
-            # Extract the arguments from the function to be decorated
-            f_kwgs = self._func_kwargs(wrapper)
 
             # Create a node to be registered to Dag
             node = Node(label=node_label)
@@ -242,12 +240,9 @@ class DagTasker:
             return wrapper
         return outer
 
-    def _func_kwargs(self, func: Callable) -> dict:
-        """Returns the keyword arguments of a function as a dictionary."""
-        signature = inspect.signature(func)
-        parameters = signature.parameters
-        func_kwargs = {param: value.default for param, value in parameters.items() if value.default != inspect.Parameter.empty}
-        return func_kwargs
+    def add_task(self, func, *args, **kwargs) -> "DagTasker":
+        self.task(*args, **kwargs)(func)
+        return self
 
     def _setup_null_node(self) -> None:
         """Registers the null node to node dispatcher."""
