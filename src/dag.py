@@ -240,6 +240,46 @@ class DagTasker:
             return wrapper
         return outer
 
+    def task_no_get_deps(self, *task_args, **task_kwargs):
+        """
+        Sample UX/UI:
+            ```python
+            dag_tasker = DagTasker(...)
+
+            @dag_tasker.task_no_get_deps(...)
+            def my_func(arg1, kwg1="Hello World") -> Any:
+                ...
+                return ...
+            ```
+
+        If a function does not need to reference the results of its dependencies, then
+        use this decorator to decorate the function without requiring the dependency
+        results `Dict[str, Any]`.
+        """
+
+        # Check if keyword arguments contains `get_deps`.
+        if any(kwarg in ["get_deps"] for kwarg in task_kwargs.keys()):
+            raise ValueError("`get_deps` is not allowed in `task_no_deps` decorator.")
+
+        def outer(func):
+            @functools.wraps(func)
+            def wrapper(*args, **kwargs):
+                result_data = func(*args, **kwargs)
+                return result_data
+
+            # Make sure to use the original function's name if not provided.
+            task_kwargs["name"] = task_kwargs.get("name", None) or func.__name__
+
+            # Use `task` method to decorate a temporary function with `dep_res` argument
+            # and set `get_deps=False` so that the function does not have to fetch the
+            # dependency results.
+            @self.task(*task_args, get_deps=False, **task_kwargs)
+            def temp_task(dep_res: Dict[str, Any], *args, **kwargs) -> Any:
+                return wrapper(*args, **kwargs)
+
+            return wrapper
+        return outer
+
     def add_task(self, func, *args, **kwargs) -> "DagTasker":
         self.task(*args, **kwargs)(func)
         return self
