@@ -12,7 +12,7 @@ class NodeExecutionError(NodeError):
     pass
 
 
-class TimeoutError(NodeExecutionError):
+class TimeoutError(NodeError):
     """Raised when a node execution exceeds its timeout."""
     pass
 
