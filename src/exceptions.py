@@ -34,3 +34,7 @@ class ResultDataError(ResultError):
 class ResultNotFoundError(ResultIOError):
     """Raised when a result for a specific node label is not found."""
     pass
+
+
+class ConduitError(Exception):
+    pass

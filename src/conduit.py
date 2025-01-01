@@ -4,6 +4,8 @@ from multiprocessing import Process, cpu_count
 from abc import ABC, abstractmethod
 from typing import Sequence
 
+from exceptions import ConduitError
+
 from .enums import NodeStateEnum
 from .node import Node, NodeDispatcher
 from .dag import Dag
@@ -11,10 +13,6 @@ from ._logger import create_logger
 
 
 logger = create_logger(__name__)
-
-
-class ConduitError(Exception):
-    pass
 
 
 class Conduit(ABC):
