@@ -7,7 +7,6 @@ tasks:
   default:
     cmds:
       - task: clean
-      - task: run-samples-parallel
 #==============================================================================
   test:
     cmds:
@@ -30,29 +29,15 @@ tasks:
       - find . -type d -name "*.pytest_cache" -exec rm -rf {} +
       - find . -type f -name "*.pyc" -delete
 #==============================================================================
-  sample-1:
-    cmds:
-      - python -B sample_1.py
 
-  sample-2:
+  run-*:
+    summary: |
+      Usage Example: 
+        `task run-sample_node` - Runs `python -B sample_node.py`
+    vars:
+      SAMPLE: '{{index .MATCH 0}}'
     cmds:
-      - python -B sample_2.py
+      - defer: { task: clean }
+      - python -B {{.SAMPLE}}.py
 
-  sample-3:
-    cmds:
-      - python -B sample_3.py
-  
-  sample-4:
-    cmds:
-      - python -B sample_4.py
-  
-  sample-5:
-    cmds:
-      - python -B sample_5.py
-
-  run-samples-parallel:
-    deps: [sample-1, sample-2, sample-3, sample-4, sample-5]
-    cmds:
-      - echo "Taskfile Parallel Done!!!"
-      - task: clean-samples
 #==============================================================================

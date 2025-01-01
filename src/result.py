@@ -4,8 +4,9 @@ import tempfile
 import uuid
 import pickle
 from pathlib import Path
-from typing import Any, Optional, Dict, Protocol, Union
+from typing import Any, Optional, Dict, Union
 from abc import ABC, abstractmethod
+
 from pydantic import BaseModel, Field
 
 from .exceptions import ResultDataError, ResultIOError, ResultNotFoundError
@@ -52,12 +53,12 @@ class ResultIO(ABC):
         self.serializer = serializer
 
     @abstractmethod
-    def write_result(self, result: Result) -> None:
+    def put_result(self, result: Result) -> None:
         """Write result to storage."""
         pass
 
     @abstractmethod
-    def read_result(self, node_label: str) -> Result:
+    def get_result(self, node_label: str) -> Result:
         """Read result from storage."""
         pass
 
@@ -70,11 +71,11 @@ class MemoryResultIO(ResultIO):
         super().__init__(location, serializer)
         self._memory_store: Dict[str, Result] = {}
 
-    def write_result(self, result: Result) -> None:
+    def put_result(self, result: Result) -> None:
         """Write result to in-memory store."""
         self._memory_store[result.node_label] = result
 
-    def read_result(self, node_label: str) -> Result:
+    def get_result(self, node_label: str) -> Result:
         """Retrieve result from memory store."""
         try:
             return self._memory_store[node_label]
@@ -84,7 +85,7 @@ class MemoryResultIO(ResultIO):
 
 class LocalResultIO(ResultIO):
     """Local file system result I/O implementation."""
-    def write_result(self, result: Result) -> None:
+    def put_result(self, result: Result) -> None:
         """Write result to a local file."""
         location_dir = Path(self.location).resolve()
         file_path = location_dir / f"{result.node_label}.{self.serializer.file_extension}"
@@ -102,7 +103,7 @@ class LocalResultIO(ResultIO):
         except Exception as e:
             raise ResultIOError(f"Error writing result to {file_path}: {e}")
 
-    def read_result(self, node_label: str) -> Result:
+    def get_result(self, node_label: str) -> Result:
         """Read result from a local file."""
         location_dir = Path(self.location).resolve()
         file_path = location_dir / f"{node_label}.{self.serializer.file_extension}"

@@ -1,23 +1,26 @@
 import inspect
 import functools
 import uuid
-import threading
-import time
+from abc import ABC, abstractmethod
 from collections import deque
-from typing import Sequence, Tuple, Callable, Any, List, Dict, Hashable
+from typing import Sequence, Tuple, Callable, Any, List, Dict, Optional
+
+from decorator import decorator
 
 from .utils import (
     _remove_duplicates,
-    _get_called_function_objects,
 )
-from .decorators import (
-    _retry_func,
-    _timeout_func,
-)
-from .exceptions import NodeError
-from .result import Result
-from .node import Node
+from .result import ResultIO
 from ._logger import create_logger
+from .node import (
+    Node,
+    NodeRunner,
+    DynamicNodeRunner,
+    DependencyResultNodeRunner,
+    NodeDispatcher,
+    OneRunnerNodeDispatcher,
+    MultiRunnerNodeDispatcher,
+)
 
 
 logger = create_logger(__name__)
@@ -147,346 +150,115 @@ class Dag:
         return path.index(node)
 
 
-def _create_null_node(prefix: str = "null-node") -> Node:
-    def null_func(label, deps_dict): return None
-    trimmed_uid = str(uuid.uuid4()).replace('-', '')[:8]
+def _create_null_node(prefix="null-node") -> Node:
     return Node(
-        f"{prefix}-{trimmed_uid}",
-        null_func,
-        use_deps=False,
-        raise_error=False
+        label=prefix + str(uuid.uuid4()).replace('-', '')[:8]
     )
 
 
-_NULL_NODE = _create_null_node(prefix="null-node")
-
-
-def node_registrator(dag: Dag,
-                     label: str,
-                     depends_on: list[str | Node] | None = None,
-                     use_deps: bool = True,
-                     raise_error: bool = True,
-                     ):
-    """Decorator for wrapping a custom function as a node to the given DAG."""
-
-    depends_on = depends_on or [_NULL_NODE]
-
-    if any(not isinstance(dep, (str, Node)) for dep in depends_on):
-        raise TypeError("The dependencies must be a String (label) or Node.")
-
-    # Check if label already used by a node in dag
-    if label in dag.node_labels:
-        raise ValueError("The label is already used.")
-
-    def outer(cb_func):
-        node = dag[label] if label in dag.node_labels \
-            else Node(
-                label,
-                cb_func,
-                use_deps=use_deps,
-                raise_error=raise_error
-            )
-
-        for dependency in depends_on:
-            if isinstance(dependency, str):
-                other_node = dag[dependency]
-                dag.add_arc(other_node, node)
-            elif isinstance(dependency, Node):
-                # This dependency must be a source node
-                dag.add_arc(dependency, node)
-
-        @functools.wraps(cb_func)
-        def wrapper(*args, **kwargs):
-            return cb_func(*args, **kwargs)
-
-        return wrapper
-
-    return outer
-
-
-class DagBuilder:
-    def __init__(self):
-        self._dag = Dag()
-
-    def add_node(self,
-                 label: str,
-                 cb_func: Callable[["Node", dict[str, Result]], Any],
-                 *cb_args,
-                 depends_on: list[str | Node] | None = None,
-                 use_deps: bool = True,
-                 raise_error: bool = True,
-                 **cb_kwargs
-                 ) -> "DagBuilder":
-
-        depends_on = depends_on or [_NULL_NODE]
-
-        node = self._dag[label] if label in self._dag.node_labels \
-            else Node(
-                label,
-                cb_func,
-                use_deps=use_deps,
-                raise_error=raise_error,
-                *cb_args,
-                **cb_kwargs
-            )
-
-        # Register the dependency arc to the DAG
-        for dependency in depends_on:
-            if isinstance(dependency, str):
-                other_node = self._dag[dependency]
-                self._dag.add_arc(other_node, node)
-            elif isinstance(dependency, Node):
-                # This dependency must be a source node
-                self._dag.add_arc(dependency, node)
-
-        return self
-
-    def reset(self) -> None:
-        """Resets the internal states of the `DagBuilder`."""
-        self._dag = Dag()
-
-    def build(self) -> Dag:
-        """Builds the `Dag`."""
-        return self._dag
-
-
-def dag_task(dag: Dag,
-             lru_maxsize: int = None,
-             typed: bool = False,
-             raise_error=True,
-             max_retries: int | None = None,
-             timeout_seconds: int | None  = None,
-             init_args: tuple = ()
-             ):
-    """
-    A decorator to wrap a function as a task node in a Directed Acyclic Graph (DAG).
-
-    This decorator registers a function as a node in the given `Dag` instance, establishing dependencies based on the functions it calls.
-    The wrapped function can be executed with the provided DAG structure, which automatically resolves the dependencies between nodes.
-
-    Args:
-        dag (Dag): The DAG instance where the task node will be registered.
-        lru_maxsize (int, optional): The maximum size for the LRU cache on the function's wrapper. Default is None, meaning no cache limit.
-        typed (bool, optional): Arguments of different types will be cached separately.. Default is False.
-        init_args (tuple, optional): The initial values for positional arguments of the function being decorated. Default is ().
-            This must be given if the function to be decorated has positional arguments.
-
-    Returns:
-        Callable: The decorated function, now wrapped with task-node functionality.
-
-    Notes:
-        - The function will be associated with a unique node label generated from the function's name.
-        - The decorator automatically identifies and establishes dependencies between nodes based on other functions 
-            that the wrapped function calls, assuming these functions are registered as nodes in the DAG.
-        - The wrapped function can accept arbitrary arguments and keyword arguments, which will be passed to
-            the callback function when invoked in the context of the DAG.
-        - Due to the design, all dag tasks (nodes) would get invoked regardless if it has dependencies or not. If another
-            dag task tries to invoke its dependencies, it will only used the cached result if it has the same argument
-            combination.
-        - If the function has keyword arguments, event if another task invoked it with same argument,
-            it will not use the cache invoked by the node itself.
-        - For now, its best practice to use positional arguments for the function to be decorated, making
-            sure that there is initial value(s) in `init_args` parameter of the dag task decorator.
-        - This decorator assumes that the function to be decorated is "idempotent". In other words,
-            performing the same action multiple times with the same arguments will always yield the same
-            outcome, without altering the final result.
-
-    Example:
-        @dag_task(dag, raise_error=True, init_args=(2,))
-        def task1(arg1):
-            ...
-            return ...
-
-        @dag_task(dag, raise_error=False)
-        def task2():
-            ...
-            value = 3
-            result_1 = task1(value)
-            ...
-            return ...
-
-    Raises:
-        ValueError: If `init_args` is an empty tuple and the function to be decorated has positional arguments.
-    """
-
-    def outer(func: Callable[[Any], Any]):
-        # Mark the function with the associated node label
-        node_label_ = "node-" + func.__name__
-        setattr(func, "node_label", node_label_)
-
-        # Get all the function call in `func` and extract all node dependencies
-        dep_node_labels = [fn.node_label for fn in _get_called_function_objects(func) if hasattr(fn, "node_label")]
-        dep_node_labels = _remove_duplicates(dep_node_labels)
-        dep_nodes = [dep_node for dep_node in dag.nodes if dep_node.label in dep_node_labels]
-
-        # Get the signature of the function and separate args and kwargs
-        signature = inspect.signature(func)
-        parameters = signature.parameters
-        _func_args = [param for param, value in parameters.items() if value.default == inspect.Parameter.empty]
-        func_kwargs = {param: value.default for param, value in parameters.items() if value.default != inspect.Parameter.empty}
-
-        # Throw an error if the function to be decorated has required positional arguments
-        # and `dag_task` parameter `init_args` is empty.
-        if _func_args and not init_args:
-            err_msg = "`init_args` tuple must be given if the function to be decorated has positional arguments."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        if not _func_args and init_args:
-            err_msg = "`init_args` must be empty if the function does not have any positional arguments."
-            logger.error(err_msg)
-            raise ValueError(err_msg)
-
-        if func_kwargs:
-            raise ValueError("The function to be decorated must not have any keyword arguments.")
-
-        # Create the Wrapper
-        @functools.lru_cache(maxsize=lru_maxsize, typed=typed)
-        @_timeout_func(timeout_seconds)
-        @_retry_func(max_retries)  # Retry calling the function if there are errors `max_retries` times.
-        @functools.wraps(func)
-        def wrapper(*args, **kwargs):
-            result_data = func(*args, **kwargs)
-            return result_data
-
-        # Create a new callback function
-        @node_registrator(
-            dag,
-            node_label_,
-            depends_on=dep_nodes,
-            use_deps=False,  # This decorator already uses LRU Cache (Memory)
-            raise_error=raise_error
-        )
-        def cb_func(node, dep_res) -> Any:
-            result_data = wrapper(*init_args, **func_kwargs)
-            return result_data
-
-        return wrapper
-    return outer
-
-
 class DagTasker:
-    ATTR_NODE_LABEL = "node_label"
+    def __init__(self, result_io: ResultIO):
+        self.dag = Dag()
+        self.result_io = result_io
+        self.node_dispatcher = MultiRunnerNodeDispatcher()
 
-    def __init__(self,
-                 log_results: bool = False,
-                 pre_hooks: List[Tuple[Callable, tuple, dict]] | None = None,
-                 post_hooks: List[Tuple[Callable, tuple, dict]] | None = None,
-                 ):
-        self._dag = Dag()
+        self._null_node = _create_null_node()
+        self._setup_null_node()  # Register null node to node dispatcher
 
-        self._pre_hooks = pre_hooks or []
-        self._post_hooks = post_hooks or []
-
-        self._log_results = log_results
-
-    @property
-    def dag(self) -> Dag:
-        return self._dag
-
-    def _get_node_dependencies(self, func: Callable) -> List[Node]:
-        """
-        Gets all the function calls in the given function
-        and extract all node dependencies.
-        """
-        dep_node_labels = [fn.node_label for fn in _get_called_function_objects(func) if hasattr(fn, self.ATTR_NODE_LABEL)]
-        dep_node_labels = _remove_duplicates(dep_node_labels)
-        return [dep_node for dep_node in self._dag.nodes if dep_node.label in dep_node_labels]
-
-    def _get_func_kwargs(self, func: Callable) -> Dict[Hashable, Any]:
-        """Returns the keyword arguments of a function."""
-        signature = inspect.signature(func)
-        parameters = signature.parameters
-        return {param: value.default for param, value in parameters.items() if value.default != inspect.Parameter.empty}
+    def create_node_runner(self,
+                           func: Callable[[Dict[str, Any]], Any], 
+                           raise_error: bool = True,
+                           get_deps: bool = False,
+                           ) -> DependencyResultNodeRunner:
+        return DependencyResultNodeRunner(
+            func,
+            self.result_io,
+            raise_error=raise_error,
+            get_deps=get_deps
+        )
 
     def task(self,
              *f_args,
-             raise_error=True,
-             lru_maxsize: int = None,
-             typed: bool = False,
-             ) -> Callable:
+             name: str | None = None,
+             depends_on: List[str | Node] | None = None,
+             raise_error: bool = True,
+             get_deps: bool = False,
+             ):
+        depends_on = depends_on or [self._null_node]
+        if any(not isinstance(dep, (str, Node)) for dep in depends_on):
+            raise TypeError("The dependencies must be a String (label) or Node.")
 
-        def outer(func: Callable):
-            # Throw error if function has keyword arguments (unhashable)
-            f_kw = self._get_func_kwargs(func)
-            if f_kw:
-                raise ValueError("The function must not have any unhashable keyword arguments.")
+        def outer(func: Callable[[Dict[str, Any]], Any]):
+            # Set the Node Label
+            node_label = name or func.__name__
 
-            # Use the function's name as the node label. No prefix and suffix.
-            node_label_ = func.__name__
+            # Check if the node label already exists in Dag
+            assert node_label not in self.dag.node_labels, \
+                f"The label {node_label} is already used."
 
-            # Mark the function with the associated node label
-            setattr(func, self.ATTR_NODE_LABEL, node_label_)
-
-            # Get all the function call in `func` and extract all node dependencies
-            dep_nodes = self._get_node_dependencies(func)
-
-            # Create a wrapper for func
-            @functools.lru_cache(maxsize=lru_maxsize, typed=typed)
             @functools.wraps(func)
-            def wrapper(*args):
-                result = func(*args)
-                return result
-
-            # Create a Temporary Node Callback Function and use
-            # `node_registrator` to add this to the dag as node.
-            @node_registrator(
-                self._dag,
-                node_label_,
-                depends_on=dep_nodes,
-                use_deps=False,
-                raise_error=raise_error,
-            )
-            def cb_func(node, deps):
-                self._run_pre_hooks()  # Run Pre-Hooks
-                result_data = wrapper(*f_args)
-                self._run_post_hooks()  # Run Post-Hooks
-
-                # Log the result if enabled
-                if self._log_results:
-                    self._log_result(wrapper, result_data)
-
+            def wrapper(*args, **kwargs):
+                result_data = func(*args, **kwargs)
                 return result_data
+
+            # Extract the arguments from the function to be decorated
+            f_kwgs = self._func_kwargs(func)
+
+            # Create a node to be registered to Dag
+            node = Node(label=node_label)
+
+            # Define the direct dependencies of the node (List[Node])
+            dependencies = [dep if isinstance(dep, Node) else self.dag[dep] for dep in depends_on]
+
+            # Create a DependencyResultNodeRunner
+            node_runner = self.create_node_runner(
+                func,
+                raise_error=raise_error,
+                get_deps=get_deps
+            )
+
+            # Construct the positional arguments for the function
+            # This requires the defined dependency nodes given in `depends_on`.`
+            f_args_ = (dependencies,) + f_args
+
+            # Add the node to node dispatcher
+            self.node_dispatcher\
+                .add_node(
+                    node,
+                    f_args_,
+                    f_kwgs,
+                    node_runner
+                )
+
+            # Add Arc to Dag
+            for dependency in depends_on:
+                if isinstance(dependency, str):
+                    other_node = self.dag[dependency]
+                    self.dag.add_arc(other_node, node)
+                elif isinstance(dependency, Node):
+                    # This dependency must be a source node
+                    self.dag.add_arc(dependency, node)
+
             return wrapper
         return outer
 
-    def retry(self, max_retries: int, sleep_for: float = 1) -> Callable:
-        # Warn: This must be put on bottom of the `task` decorator
-        # Example:
-        # @self.dag_tasker.task()
-        # @self.dag_tasker.retry(3, sleep_for=1)
-        # def some_function():
-        #     ...
+    def _func_kwargs(self, func: Callable) -> dict:
+        """Returns the keyword arguments of a function as a dictionary."""
+        signature = inspect.signature(func)
+        parameters = signature.parameters
+        func_kwargs = {param: value.default for param, value in parameters.items() if value.default != inspect.Parameter.empty}
+        return func_kwargs
 
-        assert isinstance(max_retries, int) and max_retries > 0, \
-            "`max_retries` must be a positive integer."
+    def _setup_null_node(self) -> None:
+        """Registers the null node to node dispatcher."""
+        def null_func(deps: List[Node]):
+            return None
 
-        def outer(func: Callable):
-            @functools.wraps(func)
-            def wrapper(*args, **kwargs) -> Any:
-                assert isinstance(max_retries, int) and max_retries >= 1
-                attempt = 0
-                while attempt < max_retries:
-                    try:
-                        return func(*args, **kwargs)
-                    except Exception as err:
-                        attempt += 1
-                        if attempt < max_retries:
-                            logger.warning(f"Retrying. Current attempt {attempt} out of {max_retries}.")
-                            time.sleep(sleep_for)
-                        else:
-                            logger.error("All attempts failed.")
-                            raise NodeError(err)
-            return wrapper
-        return outer
+        node_runner = self.create_node_runner(null_func)
 
-    def _log_result(self, func, result) -> None:
-        logger.info(f"Result of {func.__name__}: {result}")
-
-    def _run_pre_hooks(self):
-        for h, args, kwargs in self._pre_hooks:
-            h(*args, **kwargs)
-
-    def _run_post_hooks(self):
-        for h, args, kwargs in self._post_hooks:
-            h(*args, **kwargs)
+        self.node_dispatcher.add_node(
+            self._null_node,
+            ([],),
+            {},
+            node_runner
+        )

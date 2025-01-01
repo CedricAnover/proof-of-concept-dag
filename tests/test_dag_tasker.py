@@ -289,7 +289,7 @@ class TestDagTaskerWithConduit(unittest.TestCase):
 
     def test_dag_tasker_results(self):
         dag = self.dag_tasker._dag
-        results = {label: self.res_io.read_result(label) for label in dag.node_labels}
+        results = {label: self.res_io.get_result(label) for label in dag.node_labels}
 
         self.assertIsInstance(results, dict)
         self.assertEqual(len(results), 8)  # Because it include the Null Node
@@ -396,7 +396,7 @@ class TestDagTaskerWithConduit_TrivialAndNonTrivialScenarios(unittest.TestCase):
         self.conduit.start()
         
         dag = self.dag_tasker._dag
-        results = {label: self.res_io.read_result(label) for label in dag.node_labels}
+        results = {label: self.res_io.get_result(label) for label in dag.node_labels}
 
         for _, count in counter.items():
             self.assertEqual(count, 1)

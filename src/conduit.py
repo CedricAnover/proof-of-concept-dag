@@ -5,8 +5,7 @@ from abc import ABC, abstractmethod
 from typing import Sequence
 
 from .enums import NodeStateEnum
-from .result import ResultIO
-from .node import Node
+from .node import Node, NodeDispatcher
 from .dag import Dag
 from ._logger import create_logger
 
@@ -19,18 +18,18 @@ class ConduitError(Exception):
 
 
 class Conduit(ABC):
-    def __init__(self, dag: Dag, result_io: ResultIO):
+    def __init__(self, dag: Dag, node_dispatcher: NodeDispatcher):
         self.dag = dag
-        self.result_io = result_io
+        self.node_dispatcher = node_dispatcher
 
     def get_nodes(self, node_state: NodeStateEnum) -> Sequence[Node]:
-        return [node for node in self.dag.nodes if node.state == node_state]
+        return [node for node in self.dag.nodes if node.status == node_state]
 
     def are_all_nodes_complete(self) -> bool:
-        return all(node.state in [NodeStateEnum.COMPLETE_SUCCESS, NodeStateEnum.COMPLETE_FAIL] for node in self.dag.nodes)
+        return all(node.status in [NodeStateEnum.COMPLETE_SUCCESS, NodeStateEnum.COMPLETE_FAIL] for node in self.dag.nodes)
 
     def is_node_ready(self, node: Node) -> bool:
-        return all(dep.state in [NodeStateEnum.COMPLETE_SUCCESS, NodeStateEnum.COMPLETE_FAIL] for dep in self.dag.direct_dependencies(node))
+        return all(dep.status in [NodeStateEnum.COMPLETE_SUCCESS, NodeStateEnum.COMPLETE_FAIL] for dep in self.dag.direct_dependencies(node))
 
     @abstractmethod
     def start(self, *args, **kwargs) -> None:
@@ -74,13 +73,13 @@ class ParallelConduits:
 
 
 class AsyncConduit(Conduit):
-    def __init__(self, dag: Dag, result_io: ResultIO, concurrency_limit: int = 10, node_timeout: float = 300):
-        super().__init__(dag, result_io)
+    def __init__(self, dag: Dag, node_dispatcher: NodeDispatcher, concurrency_limit: int = 10, node_timeout: float = 300):
+        super().__init__(dag, node_dispatcher)
         self.concurrency_limit = concurrency_limit
         self.node_timeout = node_timeout  # Timeout for node execution (in seconds)
         self._node_tasks = {}  # Track tasks for all nodes
 
-    async def _async_node_start(self, node: Node, dependencies: list[Node], result_io: ResultIO) -> None:
+    async def _async_node_start(self, node: Node) -> None:
         """Run a node's computation asynchronously in a thread pool with timeout."""
         loop = asyncio.get_running_loop()
 
@@ -89,7 +88,7 @@ class AsyncConduit(Conduit):
             await asyncio.wait_for(
                 loop.run_in_executor(
                     None,  # Use the default ThreadPoolExecutor
-                    functools.partial(node.start, dependencies, result_io)
+                    functools.partial(self.node_dispatcher, node.label)
                 ),
                 timeout=self.node_timeout  # Apply timeout to each node's execution
             )
@@ -103,7 +102,7 @@ class AsyncConduit(Conduit):
         """Execute a node, ensuring its dependencies are complete."""
         # Wait for all dependency tasks to complete
         dependency_tasks = [
-            self._node_tasks[dep] for dep in self.dag.direct_dependencies(node)
+            self._node_tasks[dep.label] for dep in self.dag.direct_dependencies(node)
         ]
 
         # Wait for all dependencies to finish
@@ -112,7 +111,7 @@ class AsyncConduit(Conduit):
 
         # Run the node itself with semaphore to control concurrency
         async with semaphore:
-            await self._async_node_start(node, self.dag.direct_dependencies(node), self.result_io)
+            await self._async_node_start(node)
 
     async def _main_loop(self) -> None:
         """Main Loop."""
@@ -120,7 +119,7 @@ class AsyncConduit(Conduit):
 
         # Create tasks for all nodes upfront
         for node in self.dag.nodes:
-            self._node_tasks[node] = asyncio.create_task(self._run_node(node, semaphore))
+            self._node_tasks[node.label] = asyncio.create_task(self._run_node(node, semaphore))
 
         await asyncio.gather(*self._node_tasks.values())  # Wait for all tasks to complete
 
