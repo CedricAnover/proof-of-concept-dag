@@ -50,12 +50,8 @@ local_res_ops = LocalResultOperations.create_with_temp_location(pickle_serialize
 result_io = local_res_ops.result_io
 
 ##############################################################################
-# 1 --> 2
-# 1 --> 3
-# 1 --> 4
+# 1 --> {2, 3, 4}
 # 2 --> 3
-# 3 --> 4
-# 1 --> 4
 
 dag_tasker = DagTasker(result_io)
 
@@ -70,19 +66,16 @@ def cb_1(deps_dict: dict[str, object],
     return df
 
 
-@dag_tasker.task("Foo Bar", depends_on=["cb_1"])
+@dag_tasker.task("Foo Bar", depends_on=["cb_1"], raise_error=False)
 def cb_2(deps_dict: dict[str, object], arg1):
+    # raise Exception("Simulated Error")
     print(f"[cb_2] Calling cb_2('{arg1}')...")
-    # time.sleep(2)
+    time.sleep(2)
     print(f"[cb_2] Dependency Results: {deps_dict}")
     return arg1
 
 
-@dag_tasker.task(
-    3,
-    depends_on=["cb_2", "cb_1"],
-    get_deps=True
-)
+@dag_tasker.task(3, depends_on=["cb_2", "cb_1"], get_deps=True)
 def cb_3(deps_dict: dict[str, object], arg1, kwg1=4):
     print(f"[cb_3] Calling cb_3({arg1}, kwg1={kwg1})...")
 
@@ -91,7 +84,7 @@ def cb_3(deps_dict: dict[str, object], arg1, kwg1=4):
     return 3
 
 
-@dag_tasker.task(depends_on=["cb_3", "cb_1"], get_deps=True)
+@dag_tasker.task(depends_on=["cb_1"], get_deps=True)
 def cb_4(deps_dict: dict):
     for label, result_data in deps_dict.items():
         print(f"[cb_4] Dependency Results ({label}): {result_data}")
@@ -102,11 +95,13 @@ for src, dst in dag_tasker.dag.arcs:
 print()
 
 ##############################################################################
+local_res_ops.create_location()
+
 try:
-    local_res_ops.create_location()
     conduit = AsyncConduit(dag_tasker.dag, dag_tasker.node_dispatcher)
     conduit.start()
 except Exception as err:
     print(err)
+    raise
 finally:
     local_res_ops.delete_location()

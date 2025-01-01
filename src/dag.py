@@ -202,7 +202,7 @@ class DagTasker:
                 return result_data
 
             # Extract the arguments from the function to be decorated
-            f_kwgs = self._func_kwargs(func)
+            f_kwgs = self._func_kwargs(wrapper)
 
             # Create a node to be registered to Dag
             node = Node(label=node_label)
@@ -212,7 +212,7 @@ class DagTasker:
 
             # Create a DependencyResultNodeRunner
             node_runner = self.create_node_runner(
-                func,
+                wrapper,
                 raise_error=raise_error,
                 get_deps=get_deps
             )
