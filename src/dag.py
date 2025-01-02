@@ -1,6 +1,7 @@
 import inspect
 import functools
 import uuid
+import json
 from abc import ABC, abstractmethod
 from collections import deque
 from typing import Sequence, Tuple, Callable, Any, List, Dict, Optional
@@ -148,6 +149,20 @@ class Dag:
         if node not in path:
             return -1
         return path.index(node)
+
+
+def to_json(dag: Dag) -> str:
+    """Serializes Dag to JSON String."""
+    temp_list = [(src.json_serialize(src), dst.json_serialize(dst)) for src, dst in dag.arcs]
+    return json.dumps(temp_list)
+
+
+def from_json(dag_str: str, format = "json") -> Dag:
+    """Deserializes Dag from JSON String."""
+    temp_dag = list(json.loads(dag_str))  # List[str]
+    temp_dag = [tuple(tup_str) for tup_str in temp_dag] # List[Tuple[str, str]]
+    temp_dag = [(Node.deserialize(src_str, format=format), Node.deserialize(dst_str, format=format)) for src_str, dst_str in temp_dag]  # List[Tuple[Node, Node]]
+    return temp_dag
 
 
 def _create_null_node(prefix="null-node") -> Node:
