@@ -4,11 +4,12 @@ import tempfile
 import uuid
 import pickle
 from pathlib import Path
-from typing import Any, Optional, Dict, Union
+from typing import Any, Optional, Dict, Union, Type
 from abc import ABC, abstractmethod
 
 from pydantic import BaseModel, Field
 
+from .config import Config
 from .exceptions import ResultDataError, ResultIOError, ResultNotFoundError
 
 
@@ -243,3 +244,22 @@ class PickleSerializer(ISerializeDeserialize):
             return pickle.loads(data)
         except Exception as err:
             raise ResultDataError(err)
+
+
+class ResultIOConfig(Config):
+    location: str
+    file_extension: str
+
+    def to_object(self, result_io_kind: Type[ResultIO]) -> Type[ResultIO]:
+        if self.file_extension == "json":
+            serializer = JsonSerializer()
+        elif self.file_extension == "pickle":
+            serializer = PickleSerializer()
+        return result_io_kind(self.location, serializer)
+
+    @classmethod
+    def from_object(cls, result_io: ResultIO) -> "ResultIOConfig":
+        return cls(
+            location=result_io.location,
+            file_extension=result_io.serializer.file_extension
+        )
