@@ -83,6 +83,11 @@ class NodeRunner(ABC):
         # This makes it True/False for all nodes, if NodeRunner will be instantiated once.
         self._raise_error = raise_error
 
+        # Callbacks for Node Events
+        self.on_started: Optional[Callable[[Node], None]] = None
+        self.on_error: Optional[Callable[[Node, Exception], None]] = None
+        self.on_success: Optional[Callable[[Node, Result], None]] = None
+
     @abstractmethod
     def run(self, *args, **kwargs) -> Any:
         # TODO: (Optional) Create decorators for caching the result data.
@@ -95,6 +100,10 @@ class NodeRunner(ABC):
 
         node.change_status(NodeStateEnum.RUNNING)
 
+        # Call started callback
+        if self.on_started and callable(self.on_started):
+            self.on_started(node)
+
         result = None
         try:
             result_data = self.run(*args, **kwargs)
@@ -104,7 +113,16 @@ class NodeRunner(ABC):
                 result_data=result_data
             )
             node.change_status(NodeStateEnum.COMPLETE_SUCCESS)
+
+            # Call success callback
+            if self.on_success and callable(self.on_success):
+                self.on_success(node, result)
+
         except Exception as err:
+            # Call error callback
+            if self.on_error and callable(self.on_error):
+                self.on_error(node, err)
+
             result = Result(
                 node_label=node.label,
                 is_success=False,
